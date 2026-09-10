@@ -32,6 +32,10 @@ public sealed class GatewayLauncherTests : IDisposable
             startInfo.Environment["OPENCLAW_SERVICE_REPAIR_POLICY"]);
         Assert.Equal("1", startInfo.Environment["OPENCLAW_NO_AUTO_UPDATE"]);
         Assert.Equal(
+            GatewayLauncher.NativeGatewayIsolationValue,
+            startInfo.Environment[
+                GatewayLauncher.GatewayIsolationEnvironmentVariable]);
+        Assert.Equal(
             [Path.Combine(_payloadDirectory, "openclaw.mjs")],
             startInfo.ArgumentList);
     }
@@ -67,6 +71,10 @@ public sealed class GatewayLauncherTests : IDisposable
             "external",
             startInfo.Environment["OPENCLAW_SERVICE_REPAIR_POLICY"]);
         Assert.Equal("1", startInfo.Environment["OPENCLAW_NO_AUTO_UPDATE"]);
+        Assert.Equal(
+            GatewayLauncher.NativeGatewayIsolationValue,
+            startInfo.Environment[
+                GatewayLauncher.GatewayIsolationEnvironmentVariable]);
         Assert.Equal(
             [Path.Combine(_payloadDirectory, "openclaw.mjs"), .. arguments],
             startInfo.ArgumentList);

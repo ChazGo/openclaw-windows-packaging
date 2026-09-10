@@ -4,6 +4,10 @@ namespace OpenClaw.Launcher;
 
 public static class GatewayLauncher
 {
+    public const string GatewayIsolationEnvironmentVariable =
+        "OPENCLAW_GATEWAY_ISOLATION";
+    public const string NativeGatewayIsolationValue = "disabled";
+
     public static async Task<int> RunAsync(
         string nodePath,
         string payloadDirectory,
@@ -67,6 +71,8 @@ public static class GatewayLauncher
         startInfo.Environment["OPENCLAW_SUPERVISOR_MODE"] = "external";
         startInfo.Environment["OPENCLAW_SERVICE_REPAIR_POLICY"] = "external";
         startInfo.Environment["OPENCLAW_NO_AUTO_UPDATE"] = "1";
+        startInfo.Environment[GatewayIsolationEnvironmentVariable] =
+            NativeGatewayIsolationValue;
         startInfo.ArgumentList.Add(entryPoint);
 
         foreach (string argument in openClawArguments)

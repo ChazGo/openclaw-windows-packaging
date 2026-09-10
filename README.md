@@ -41,13 +41,15 @@ copy, repair, or otherwise change package files at runtime.
 Every OpenClaw child process runs with
 `OPENCLAW_SUPERVISOR_MODE=external`,
 `OPENCLAW_SERVICE_REPAIR_POLICY=external`, and
-`OPENCLAW_NO_AUTO_UPDATE=1`. These declare external lifecycle ownership,
-prevent doctor-owned service repair, and disable configured background
-auto-updates. The pinned OpenClaw `v2026.8.2` release honors external supervisor
-mode by refusing native service mutation and OpenClaw self-update with guidance
-to use the external supervisor's workflow. This behavior belongs to upstream
-OpenClaw; the launcher does not reserve, reject, or rewrite upstream command
-arguments.
+`OPENCLAW_NO_AUTO_UPDATE=1`. It also sets
+`OPENCLAW_GATEWAY_ISOLATION=disabled` because the current direct-execution path
+runs as the signed-in Windows user. These declare external lifecycle ownership,
+prevent doctor-owned service repair, disable configured background auto-updates,
+and accurately identify the current Gateway launch boundary. The pinned OpenClaw
+`v2026.8.2` release honors external supervisor mode by refusing native service
+mutation and OpenClaw self-update with guidance to use the external supervisor's
+workflow. This behavior belongs to upstream OpenClaw; the launcher does not
+reserve, reject, or rewrite upstream command arguments.
 OpenClaw inherits the terminal's working directory; the launcher does not make
 the read-only application directory the workspace.
 
