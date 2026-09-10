@@ -164,8 +164,7 @@ immutable MSIX installation. OpenClaw user state remains outside the package.
 Updating or removing the MSIX does not automatically delete that state or stop
 a running Gateway. Use OpenClaw's documented
 [`openclaw uninstall`](https://docs.openclaw.ai/install/uninstall) flow before
-removing the MSIX. The current package does not create or use
-`%USERPROFILE%\.openclaw-msix`.
+removing the MSIX.
 
 ## Integrity and isolation boundary
 
