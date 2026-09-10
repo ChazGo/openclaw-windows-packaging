@@ -13,9 +13,20 @@ public sealed class ClawCtlConsoleTests : IDisposable
 
         string help = output.ToString();
         Assert.Contains("setup", help, StringComparison.Ordinal);
-        Assert.DoesNotContain("prepare", help, StringComparison.Ordinal);
-        Assert.DoesNotContain("verify", help, StringComparison.Ordinal);
-        Assert.DoesNotContain("repair", help, StringComparison.Ordinal);
+        Assert.Contains("readiness", help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--version", help, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "prepare",
+            help,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            $"{Environment.NewLine}  verify",
+            help,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            $"{Environment.NewLine}  repair",
+            help,
+            StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             NodeRuntimeResolver.SupportedVersions,
             help,
