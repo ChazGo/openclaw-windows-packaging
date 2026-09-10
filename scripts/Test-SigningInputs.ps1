@@ -18,23 +18,67 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-function Read-ZipEntryText {
+function New-PackageEntryIndex {
     param(
         [Parameter(Mandatory)]
-        [IO.Compression.ZipArchive]$Archive,
+        [IO.Compression.ZipArchive]$Archive
+    )
+
+    $entriesByPath =
+        [System.Collections.Generic.Dictionary[
+            string,
+            System.IO.Compression.ZipArchiveEntry
+        ]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+    foreach ($entry in $Archive.Entries) {
+        if ([string]::IsNullOrEmpty($entry.Name)) {
+            continue
+        }
+
+        $decodedPath = [Uri]::UnescapeDataString($entry.FullName)
+        if ($entriesByPath.ContainsKey($decodedPath)) {
+            throw "The MSIX contains a duplicate decoded path: $decodedPath"
+        }
+        $entriesByPath.Add($decodedPath, $entry)
+    }
+
+    return $entriesByPath
+}
+
+function Get-PackageEntry {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.Generic.Dictionary[
+            string,
+            System.IO.Compression.ZipArchiveEntry
+        ]]$EntriesByPath,
 
         [Parameter(Mandatory)]
         [string]$Path
     )
 
-    $entries = @($Archive.Entries | Where-Object {
-        $_.FullName -eq $Path
-    })
-    if ($entries.Count -ne 1) {
-        throw "Expected one '$Path' entry; found $($entries.Count)."
+    if (-not $EntriesByPath.ContainsKey($Path)) {
+        throw "Expected one '$Path' entry; found 0."
     }
 
-    $stream = $entries[0].Open()
+    return $EntriesByPath[$Path]
+}
+
+function Read-ZipEntryText {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.Generic.Dictionary[
+            string,
+            System.IO.Compression.ZipArchiveEntry
+        ]]$EntriesByPath,
+
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $entry = Get-PackageEntry -EntriesByPath $EntriesByPath -Path $Path
+    $stream = $entry.Open()
     $reader = [IO.StreamReader]::new($stream)
     try {
         return $reader.ReadToEnd()
@@ -45,23 +89,13 @@ function Read-ZipEntryText {
     }
 }
 
-function Get-ZipEntrySha256 {
+function Get-PackageEntrySha256 {
     param(
         [Parameter(Mandatory)]
-        [IO.Compression.ZipArchive]$Archive,
-
-        [Parameter(Mandatory)]
-        [string]$Path
+        [IO.Compression.ZipArchiveEntry]$Entry
     )
 
-    $entries = @($Archive.Entries | Where-Object {
-        $_.FullName -eq $Path
-    })
-    if ($entries.Count -ne 1) {
-        throw "Expected one '$Path' entry; found $($entries.Count)."
-    }
-
-    $stream = $entries[0].Open()
+    $stream = $Entry.Open()
     $sha256 = [Security.Cryptography.SHA256]::Create()
     try {
         return [Convert]::ToHexString(
@@ -71,60 +105,6 @@ function Get-ZipEntrySha256 {
     finally {
         $sha256.Dispose()
         $stream.Dispose()
-    }
-}
-
-function Assert-ZipPayloadDoesNotBundleNode {
-    param(
-        [Parameter(Mandatory)]
-        [IO.Compression.ZipArchive]$Archive,
-
-        [Parameter(Mandatory)]
-        [string]$Path,
-
-        [Parameter(Mandatory)]
-        [string]$Architecture
-    )
-
-    $entries = @($Archive.Entries | Where-Object {
-        $_.FullName -eq $Path
-    })
-    if ($entries.Count -ne 1) {
-        throw "Expected one '$Path' entry; found $($entries.Count)."
-    }
-
-    $temporaryArchive = Join-Path $env:TEMP (
-        "openclaw-payload-$Architecture-$([guid]::NewGuid().ToString('N')).tar.gz"
-    )
-    $source = $entries[0].Open()
-    $destination = [IO.File]::Create($temporaryArchive)
-    try {
-        $source.CopyTo($destination)
-    }
-    finally {
-        $destination.Dispose()
-        $source.Dispose()
-    }
-
-    try {
-        $payloadEntries = @(& tar -tzf $temporaryArchive)
-        if ($LASTEXITCODE -ne 0) {
-            throw "Unable to inspect the embedded $architecture payload archive."
-        }
-
-        $bundledNodeEntries = @(
-            $payloadEntries |
-                Where-Object {
-                    $_ -match '(^|[\\/])node[.]exe$' -or
-                    [IO.Path]::GetFileName($_) -match '^node-v\d'
-                }
-        )
-        if ($bundledNodeEntries.Count -ne 0) {
-            throw "The embedded $architecture payload bundles Node.js."
-        }
-    }
-    finally {
-        Remove-Item -LiteralPath $temporaryArchive -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -183,6 +163,9 @@ foreach ($architecture in @('x64', 'arm64')) {
         $metadata.payloadRepository -ne $policy.repository -or
         $metadata.payloadRequestedRef -ine $approvedCommit -or
         $metadata.payloadResolvedCommit -ine $approvedCommit -or
+        $metadata.payloadLayout -ne 'immutable-package' -or
+        $metadata.payloadFileCount -isnot [int64] -or
+        $metadata.payloadFileCount -le 0 -or
         $metadata.architecture -ne $architecture -or
         $metadata.archive -ne $msix.Name -or
         $metadata.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or
@@ -208,14 +191,13 @@ foreach ($architecture in @('x64', 'arm64')) {
 
     $packageArchive = [IO.Compression.ZipFile]::OpenRead($msix.FullName)
     try {
+        # MSIX percent-encodes some names, so index decoded paths once.
+        $entriesByPath = New-PackageEntryIndex -Archive $packageArchive
         $bundledNodeEntries = @(
-            $packageArchive.Entries |
+            $entriesByPath.Keys |
                 Where-Object {
-                    -not [string]::IsNullOrEmpty($_.Name) -and
-                    (
-                        $_.Name -ieq 'node.exe' -or
-                        $_.Name -match '^node-v\d'
-                    )
+                    [IO.Path]::GetFileName($_) -ieq 'node.exe' -or
+                    [IO.Path]::GetFileName($_) -match '^node-v\d'
                 }
         )
         if ($bundledNodeEntries.Count -ne 0) {
@@ -223,7 +205,7 @@ foreach ($architecture in @('x64', 'arm64')) {
         }
 
         [xml]$manifest = Read-ZipEntryText `
-            -Archive $packageArchive `
+            -EntriesByPath $entriesByPath `
             -Path 'AppxManifest.xml'
         $identity = $manifest.SelectSingleNode(
             "/*[local-name()='Package']/*[local-name()='Identity']"
@@ -237,37 +219,101 @@ foreach ($architecture in @('x64', 'arm64')) {
             throw "The $architecture MSIX manifest identity is unexpected."
         }
 
-        $payloadMetadataPath = 'payload/payload-metadata.json'
-        $payloadMetadata = Read-ZipEntryText `
-            -Archive $packageArchive `
-            -Path $payloadMetadataPath |
+        $payloadFiles = Read-ZipEntryText `
+            -EntriesByPath $entriesByPath `
+            -Path 'payload/payload-files.json' |
             ConvertFrom-Json
         if (
-            $payloadMetadata.repository -ne $policy.repository -or
-            $payloadMetadata.requestedRef -ine $approvedCommit -or
-            $payloadMetadata.resolvedCommit -ine $approvedCommit -or
-            $payloadMetadata.architecture -ne $architecture -or
-            $payloadMetadata.archive -notmatch '^app-(x64|arm64)\.tar\.gz$' -or
-            $payloadMetadata.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or
-            $payloadMetadata.resolvedCommit -ine
-                $metadata.payloadResolvedCommit
+            $null -eq $payloadFiles.files -or
+            @($payloadFiles.files).Count -ne $metadata.payloadFileCount
         ) {
-            throw "The embedded $architecture payload metadata is not approved."
+            throw "The embedded $architecture payload inventory is invalid."
         }
 
-        $payloadArchivePath = "payload/$($payloadMetadata.archive)"
-        Assert-ZipPayloadDoesNotBundleNode `
-            -Archive $packageArchive `
-            -Path $payloadArchivePath `
-            -Architecture $architecture
-        $actualPayloadHash = Get-ZipEntrySha256 `
-            -Archive $packageArchive `
-            -Path $payloadArchivePath
+        $expectedApplicationPaths =
+            [System.Collections.Generic.HashSet[string]]::new(
+                [System.StringComparer]::OrdinalIgnoreCase
+            )
+        $hasEntryPoint = $false
+        foreach ($file in @($payloadFiles.files)) {
+            $relativePath = [string]$file.path
+            $segments = @($relativePath.Split('/'))
+            # Reject rooted/absolute paths and '.'/'..' segments: the
+            # inventory is untrusted signing input, and an unvalidated path
+            # here would let a malicious entry escape app/ when resolved.
+            if (
+                [string]::IsNullOrWhiteSpace($relativePath) -or
+                $relativePath.StartsWith('/') -or
+                [IO.Path]::IsPathRooted($relativePath) -or
+                $relativePath.Contains('\') -or
+                $relativePath.Contains(':') -or
+                $segments -contains '' -or
+                $segments -contains '.' -or
+                $segments -contains '..' -or
+                $file.length -isnot [int64] -or
+                $file.length -lt 0 -or
+                $file.sha256 -notmatch '^[0-9a-fA-F]{64}$'
+            ) {
+                throw "The embedded $architecture payload inventory is invalid."
+            }
+
+            $packagePath = "app/$relativePath"
+            if (-not $expectedApplicationPaths.Add($packagePath)) {
+                throw (
+                    "The embedded $architecture payload inventory has " +
+                    'duplicate paths.'
+                )
+            }
+            if ($relativePath -ieq 'openclaw.mjs') {
+                $hasEntryPoint = $true
+            }
+
+            $entry = Get-PackageEntry `
+                -EntriesByPath $entriesByPath `
+                -Path $packagePath
+            $actualLength = $entry.Length
+            $actualHash = Get-PackageEntrySha256 -Entry $entry
+            if (
+                $actualLength -ne $file.length -or
+                $actualHash -ine $file.sha256
+            ) {
+                throw (
+                    "The embedded $architecture application file is invalid: " +
+                    $relativePath
+                )
+            }
+        }
+
+        if (-not $hasEntryPoint) {
+            throw (
+                "The embedded $architecture payload inventory has no " +
+                'openclaw.mjs.'
+            )
+        }
+
+        $actualApplicationPaths = @(
+            $entriesByPath.Keys |
+                Where-Object {
+                    $_.StartsWith(
+                        'app/',
+                        [StringComparison]::OrdinalIgnoreCase
+                    )
+                }
+        )
+        # The per-file loop above already verified every inventoried file's
+        # hash matches the package; this set-equality check additionally
+        # catches extra app/ files present in the MSIX but absent from the
+        # inventory, which would otherwise go unverified.
         if (
-            $actualPayloadHash -ne
-                ([string]$payloadMetadata.sha256).ToLowerInvariant()
+            $actualApplicationPaths.Count -ne
+                $expectedApplicationPaths.Count -or
+            @($actualApplicationPaths | Where-Object {
+                -not $expectedApplicationPaths.Contains($_)
+            }).Count -ne 0
         ) {
-            throw "The embedded $architecture payload hash is invalid."
+            throw (
+                "The embedded $architecture application file set is invalid."
+            )
         }
     }
     finally {

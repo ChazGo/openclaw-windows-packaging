@@ -76,28 +76,55 @@ function Test-PackageVersion {
     }
 }
 
-function Assert-TarDoesNotBundleNode {
+function Assert-ApplicationDoesNotBundleNode {
     param(
         [Parameter(Mandatory)]
         [string]$Path
     )
 
-    $entries = @(& tar -tzf $Path)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to inspect payload archive: $Path"
-    }
-
     $bundledNodeEntries = @(
-        $entries |
+        Get-ChildItem -LiteralPath $Path -File -Force -Recurse |
             Where-Object {
-                $_ -match '(^|[\\/])node[.]exe$' -or
-                [IO.Path]::GetFileName($_) -match '^node-v\d'
+                $_.Name -ieq 'node.exe' -or
+                $_.Name -match '^node-v\d'
             }
     )
     if ($bundledNodeEntries.Count -ne 0) {
         throw (
             'The OpenClaw payload must not bundle Node.js: ' +
-            (($bundledNodeEntries | Sort-Object) -join ', ')
+            (
+                $bundledNodeEntries |
+                    ForEach-Object {
+                        [IO.Path]::GetRelativePath($Path, $_.FullName)
+                    } |
+                    Sort-Object
+            ) -join ', '
+        )
+    }
+}
+
+function Assert-ApplicationHasNoReparsePoints {
+    # npm installs can produce symlinks/junctions (e.g. workspace links).
+    # Reject them: the per-file inventory hashes file content by path, and a
+    # link could point outside the expanded tree or resolve differently than
+    # what was hashed at build time.
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $reparsePoint = Get-ChildItem `
+        -LiteralPath $Path `
+        -Force `
+        -Recurse |
+        Where-Object {
+            ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        } |
+        Select-Object -First 1
+    if ($null -ne $reparsePoint) {
+        throw (
+            'The OpenClaw payload must not contain links or reparse points: ' +
+            [IO.Path]::GetRelativePath($Path, $reparsePoint.FullName)
         )
     }
 }
@@ -125,53 +152,99 @@ Test-PackageVersion
 Add-VswhereToPath
 
 $PayloadDirectory = (Resolve-Path -LiteralPath $PayloadDirectory).Path
-$payloadArchive = Join-Path $PayloadDirectory "app-$Architecture.tar.gz"
+$payloadApplication = Join-Path $PayloadDirectory 'app'
 $payloadMetadata = Join-Path $PayloadDirectory 'payload-metadata.json'
-foreach ($requiredPath in @($payloadArchive, $payloadMetadata)) {
-    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
-        throw "Required MSIX input was not found: $requiredPath"
-    }
+if (-not (Test-Path -LiteralPath $payloadApplication -PathType Container)) {
+    throw "Required MSIX input was not found: $payloadApplication"
+}
+if (-not (Test-Path -LiteralPath $payloadMetadata -PathType Leaf)) {
+    throw "Required MSIX input was not found: $payloadMetadata"
 }
 
 $payloadInfo = Get-Content -LiteralPath $payloadMetadata -Raw | ConvertFrom-Json
 if (
     $payloadInfo.repository -ne 'https://github.com/openclaw/openclaw' -or
     $payloadInfo.architecture -ne $Architecture -or
-    $payloadInfo.archive -ne (Split-Path $payloadArchive -Leaf) -or
-    $payloadInfo.resolvedCommit -notmatch '^[0-9a-fA-F]{40}$' -or
-    $payloadInfo.sha256 -notmatch '^[0-9a-fA-F]{64}$'
+    $payloadInfo.layout -ne 'expanded-directory' -or
+    $payloadInfo.requestedRef -isnot [string] -or
+    [string]::IsNullOrWhiteSpace($payloadInfo.requestedRef) -or
+    $payloadInfo.resolvedCommit -notmatch '^[0-9a-fA-F]{40}$'
 ) {
     throw 'Payload metadata is not valid for this MSIX package.'
 }
 
-$payloadHash = (
-    Get-FileHash -LiteralPath $payloadArchive -Algorithm SHA256
-).Hash.ToLowerInvariant()
-if ($payloadInfo.sha256 -ine $payloadHash) {
-    throw 'Payload hash does not match payload metadata.'
+if (-not (Test-Path `
+    -LiteralPath (Join-Path $payloadApplication 'openclaw.mjs') `
+    -PathType Leaf)) {
+    throw 'Expanded payload does not contain openclaw.mjs.'
 }
-Assert-TarDoesNotBundleNode -Path $payloadArchive
+Assert-ApplicationHasNoReparsePoints -Path $payloadApplication
+Assert-ApplicationDoesNotBundleNode -Path $payloadApplication
 
 $contentRoot = Join-Path $repositoryRoot 'content'
 $openClawContent = Join-Path $contentRoot 'openclaw'
+$applicationTarget = Join-Path $openClawContent 'app'
 New-Item -Path $openClawContent -ItemType Directory -Force | Out-Null
 
-$stagedPayloadArchive = Join-Path `
-    $openClawContent `
-    (Split-Path $payloadArchive -Leaf)
-$stagedPayloadMetadata = Join-Path $openClawContent 'payload-metadata.json'
 if (
-    [IO.Path]::GetFullPath($payloadArchive) -ne
-    [IO.Path]::GetFullPath($stagedPayloadArchive)
+    [IO.Path]::GetFullPath($payloadApplication) -ne
+    [IO.Path]::GetFullPath($applicationTarget)
 ) {
-    Copy-Item -LiteralPath $payloadArchive -Destination $stagedPayloadArchive -Force
+    Remove-DirectoryIfPresent -Path $applicationTarget
+    Copy-Item `
+        -LiteralPath $payloadApplication `
+        -Destination $applicationTarget `
+        -Recurse
 }
-if (
-    [IO.Path]::GetFullPath($payloadMetadata) -ne
-    [IO.Path]::GetFullPath($stagedPayloadMetadata)
-) {
-    Copy-Item -LiteralPath $payloadMetadata -Destination $stagedPayloadMetadata -Force
+
+$payloadSymbols = @(
+    # MSBuild's own AppxPackagePayload step strips .pdb files when it later
+    # packages content\openclaw\app; remove them here too so the inventory
+    # built below matches what actually ends up in the MSIX.
+    Get-ChildItem `
+        -LiteralPath $applicationTarget `
+        -Filter '*.pdb' `
+        -File `
+        -Force `
+        -Recurse
+)
+foreach ($payloadSymbol in $payloadSymbols) {
+    Remove-Item -LiteralPath $payloadSymbol.FullName -Force
 }
+if ($payloadSymbols.Count -ne 0) {
+    Write-Host (
+        "Excluded $($payloadSymbols.Count) payload PDB files from the MSIX."
+    )
+}
+
+$payloadFiles = @(
+    Get-ChildItem -LiteralPath $applicationTarget -File -Force -Recurse |
+        ForEach-Object {
+            [ordered]@{
+                path = (
+                    [IO.Path]::GetRelativePath(
+                        $applicationTarget,
+                        $_.FullName
+                    )
+                ).Replace('\', '/')
+                length = $_.Length
+                sha256 = (
+                    Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+                ).Hash.ToLowerInvariant()
+            }
+        } |
+        Sort-Object path
+)
+if ($payloadFiles.Count -eq 0) {
+    throw 'Expanded payload contains no files.'
+}
+$payloadInventoryPath = Join-Path $openClawContent 'payload-files.json'
+[ordered]@{
+    files = $payloadFiles
+} |
+    # Keep the nested inventory file records intact.
+    ConvertTo-Json -Depth 4 |
+    Set-Content -LiteralPath $payloadInventoryPath -Encoding utf8
 
 $temporaryRoot = if ($env:RUNNER_TEMP) {
     $env:RUNNER_TEMP
@@ -237,10 +310,22 @@ try {
         [System.Collections.Generic.Dictionary[string, object]]::new(
             [System.StringComparer]::OrdinalIgnoreCase
         )
+    foreach ($applicationFile in $payloadFiles) {
+        $expectedPackageFiles.Add(
+            "app/$($applicationFile.path)",
+            [pscustomobject]@{
+                Hash = $applicationFile.sha256
+            }
+        )
+    }
     $expectedPackageFiles.Add(
-        "payload/$(Split-Path $payloadArchive -Leaf)",
+        'payload/payload-files.json',
         [pscustomobject]@{
-            Hash = $payloadHash
+            Hash = (
+                Get-FileHash `
+                    -LiteralPath $payloadInventoryPath `
+                    -Algorithm SHA256
+            ).Hash.ToLowerInvariant()
         }
     )
     $packageEntries = [System.Collections.Generic.HashSet[string]]::new(
@@ -255,7 +340,9 @@ try {
             }
 
             $decodedPath = [Uri]::UnescapeDataString($entry.FullName)
-            $null = $packageEntries.Add($decodedPath)
+            if (-not $packageEntries.Add($decodedPath)) {
+                throw "The MSIX contains a duplicate decoded path: $decodedPath"
+            }
             $expectedEntry = $null
             if (
                 -not $expectedPackageFiles.Remove(
@@ -374,6 +461,8 @@ try {
         payloadRepository = $payloadInfo.repository
         payloadRequestedRef = $payloadInfo.requestedRef
         payloadResolvedCommit = $payloadInfo.resolvedCommit.ToLowerInvariant()
+        payloadLayout = 'immutable-package'
+        payloadFileCount = $payloadFiles.Count
         architecture = $Architecture
         archive = $msixName
         sha256 = $msixHash
