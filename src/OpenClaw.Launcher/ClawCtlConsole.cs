@@ -10,13 +10,11 @@ internal static class ClawCtlConsole
         output.WriteLine();
         output.WriteLine("Commands:");
         output.WriteLine(
-            "  setup       Verify Node.js and the packaged OpenClaw application.");
+            "  setup       Extract Node.js and verify the packaged OpenClaw application.");
         output.WriteLine();
         output.WriteLine("Options:");
         output.WriteLine("  -h, --help  Show this help.");
         output.WriteLine("  --version   Print the packaged launcher version.");
-        output.WriteLine();
-        WriteNodePrerequisite(output);
         output.WriteLine();
         output.WriteLine("Run `openclaw <arguments>` to invoke the OpenClaw CLI.");
     }
@@ -24,18 +22,11 @@ internal static class ClawCtlConsole
     public static void WriteUsage(TextWriter output) =>
         output.WriteLine("Usage: clawctl [setup | --help | --version]");
 
-    public static void WriteNodePrerequisite(TextWriter output)
-    {
-        output.WriteLine(
-            $"Prerequisite: install Node.js {NodeRuntimeResolver.SupportedVersions}.");
-        output.WriteLine($"  {NodeRuntimeResolver.InstallCommand}");
-    }
-
     internal static void WriteNodeRuntimeSummary(
         TextWriter output,
         NodeRuntime runtime) =>
         output.WriteLine(
-            $"Using Node.js {runtime.Version} from {runtime.ExecutablePath}");
+            $"Bundled Node.js {runtime.Version} is ready at {runtime.ExecutablePath}");
 
     public static void WriteReadinessSummary(
         TextWriter output,

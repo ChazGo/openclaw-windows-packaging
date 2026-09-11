@@ -13,7 +13,7 @@ public sealed class ProgramTests : IDisposable
             Path.Combine(applicationDirectory, "openclaw.mjs"),
             "console.log('fixture');");
         string[] arguments = ["gateway", "run", "--port", "12345"];
-        var options = new HostOptions(applicationDirectory, arguments);
+        var options = new HostOptions(applicationDirectory, null, arguments);
         var nodeRuntime = new NodeRuntime(
             Path.Combine(_testDirectory, "node.exe"),
             new Version(24, 15, 0),
@@ -44,14 +44,14 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task SetupChecksNodeAndPackagedApplicationWithoutMutation()
+    public async Task SetupPreparesNodeAndChecksPackagedApplication()
     {
         string applicationDirectory = Path.Combine(_testDirectory, "app");
         Directory.CreateDirectory(applicationDirectory);
         string entryPoint = Path.Combine(applicationDirectory, "openclaw.mjs");
         await File.WriteAllTextAsync(entryPoint, "console.log('fixture');");
         DateTime lastWriteTime = File.GetLastWriteTimeUtc(entryPoint);
-        var options = new HostOptions(applicationDirectory, []);
+        var options = new HostOptions(applicationDirectory, null, []);
         var nodeRuntime = new NodeRuntime(
             Path.Combine(_testDirectory, "node.exe"),
             new Version(24, 15, 0),
@@ -86,7 +86,7 @@ public sealed class ProgramTests : IDisposable
 
         await Assert.ThrowsAsync<FileNotFoundException>(
             () => Program.RunControlAsync(
-            new HostOptions(null, []),
+            new HostOptions(null, null, []),
             ["setup"],
             _ => { },
             _ => { },
@@ -112,7 +112,7 @@ public sealed class ProgramTests : IDisposable
 
         await Assert.ThrowsAsync<FileNotFoundException>(
             () => Program.RunAgentAsync(
-            new HostOptions(null, []),
+            new HostOptions(null, null, []),
             _ => { },
             _ =>
             {

@@ -142,9 +142,10 @@ bypassable, and required CI checks remain authoritative.
   Packaging builds set it to `true` and supply a runtime identifier.
 - Treat launcher arguments as OpenClaw-owned. Do not add host-only switches,
   consume `--`, rewrite arguments, or block upstream commands.
-- Preserve direct execution from the read-only MSIX package. `clawctl setup`
-  is a readiness check; do not add runtime extraction, copying, repair, or
-  launcher-managed package state under the user profile.
+- Preserve direct execution of `app\openclaw.mjs` from the read-only MSIX
+  package. `clawctl setup` owns idempotent extraction of the bundled Node.js
+  archive into versioned package LocalState; do not copy the OpenClaw
+  application payload or use device-installed Node.js.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, and signing validation.
 - Metadata files are part of the release trust chain. Coordinate changes across

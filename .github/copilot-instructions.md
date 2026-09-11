@@ -57,10 +57,12 @@ and ARM64 separately.
   app execution alias and declares the `OpenClaw.Gateway` MSIX identity.
 - The package contains an expanded, read-only OpenClaw application tree.
   `HostOptions` resolves `app\openclaw.mjs` directly from the package.
-- `openclaw` resolves device-installed Node.js, confirms the packaged entry
-  point exists, and forwards every argument unchanged to `openclaw.mjs`.
-- `clawctl setup` is a read-only readiness check for compatible Node.js and the
-  packaged entry point. Runtime launches do not hash or walk package files.
+- `openclaw` resolves the Node.js executable extracted into package LocalState,
+  confirms the packaged entry point exists, and forwards every argument
+  unchanged to `openclaw.mjs`.
+- `clawctl setup` idempotently extracts the architecture-specific bundled
+  Node.js archive into versioned package LocalState and verifies the packaged
+  entry point. Runtime launches do not hash or walk application files.
 - `GatewayLauncher` starts Node without a shell, uses `ArgumentList`, inherits
   the console streams, and sets `OPENCLAW_SUPERVISOR_MODE=external` plus
   `OPENCLAW_NO_AUTO_UPDATE=1`. The child process exit code is the launcher exit
@@ -71,9 +73,10 @@ and ARM64 separately.
 - The GitHub workflow first builds and packs a pinned
   `openclaw/openclaw` revision on Linux. Windows matrix jobs use
   `Build-Payload.ps1` to produce x64/ARM64 expanded trees and build metadata,
-  then `Build-MSIX.ps1` to reject bundled Node.js, build the application
-  inventory, publish the NativeAOT host, validate package contents, and emit
-  MSIX metadata.
+  then downloads the matching official Node.js archive and uses
+  `Build-MSIX.ps1` to reject Node.js from the application payload, build the
+  application inventory, publish the NativeAOT host, validate package
+  contents, and emit MSIX metadata including the runtime hash.
 - Unsigned artifacts are the normal PR/push output. Test signing uses a
   temporary runner-local certificate. Official signing is gated to `main` and
   the immutable upstream commit in `release-policy.json`; signing inputs are
@@ -105,9 +108,10 @@ and ARM64 separately.
 - Treat launcher arguments as OpenClaw-owned. Do not add host-only switches,
   consume `--`, rewrite arguments, or block upstream commands; tests explicitly
   protect transparent forwarding.
-- Preserve direct execution from the immutable package and the caller's
-  working directory. Do not add runtime extraction, copying, hashing, or
-  inventory walks.
+- Preserve direct execution of `app\openclaw.mjs` from the immutable package
+  and the caller's working directory. Node.js extraction belongs only to
+  `clawctl setup` and targets versioned package LocalState; do not copy the
+  OpenClaw application payload.
 - The build-time inventory is a release trust boundary. Keep safe unique paths,
   lengths, and SHA-256 values synchronized across composition and signing
   validation.

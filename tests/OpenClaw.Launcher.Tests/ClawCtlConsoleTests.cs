@@ -27,14 +27,7 @@ public sealed class ClawCtlConsoleTests : IDisposable
             $"{Environment.NewLine}  repair",
             help,
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(
-            NodeRuntimeResolver.SupportedVersions,
-            help,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            NodeRuntimeResolver.InstallCommand,
-            help,
-            StringComparison.Ordinal);
+        Assert.Contains("Extract Node.js", help, StringComparison.Ordinal);
         Assert.DoesNotContain("update-package", help, StringComparison.Ordinal);
         Assert.DoesNotContain("gateway-service", help, StringComparison.Ordinal);
     }

@@ -13,9 +13,6 @@ internal sealed record NodeRuntime(
 
 internal static partial class NodeRuntimeResolver
 {
-    public const string InstallCommand =
-        "winget install --id OpenJS.NodeJS.LTS --exact --source winget";
-
     private static readonly TimeSpan VersionQueryTimeout = TimeSpan.FromSeconds(10);
     private static readonly NodeVersionRange[] SupportedVersionRanges =
     [
@@ -32,8 +29,16 @@ internal static partial class NodeRuntimeResolver
                 : $">={range.Minimum}"));
 
     public static Task<NodeRuntime> ResolveAsync(CancellationToken cancellationToken) =>
+        ResolvePathAsync(
+            NodeRuntimeInstaller.GetExecutablePath(
+                RuntimeInformation.ProcessArchitecture),
+            cancellationToken);
+
+    public static Task<NodeRuntime> ResolvePathAsync(
+        string executablePath,
+        CancellationToken cancellationToken) =>
         ResolveAsync(
-            FindPathCandidates(),
+            File.Exists(executablePath) ? [executablePath] : [],
             QueryVersionAsync,
             ReadArchitecture,
             RuntimeInformation.ProcessArchitecture,
@@ -49,7 +54,8 @@ internal static partial class NodeRuntimeResolver
         if (candidates.Count == 0)
         {
             throw new InvalidOperationException(
-                CreateFailureMessage("Node.js was not found on PATH."));
+                CreateFailureMessage(
+                    "The bundled Node.js runtime has not been extracted."));
         }
 
         var failures = new List<string>();
@@ -118,49 +124,8 @@ internal static partial class NodeRuntimeResolver
 
     internal static string CreateFailureMessage(string detail) =>
         $"{detail}{Environment.NewLine}" +
-        $"Install a supported Node.js runtime ({SupportedVersions}):{Environment.NewLine}" +
-        $"  {InstallCommand}{Environment.NewLine}" +
-        "Then open a new terminal and retry.";
-
-    private static List<string> FindPathCandidates()
-    {
-        string? pathValue = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(pathValue))
-        {
-            return [];
-        }
-
-        var candidates = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string entry in pathValue.Split(Path.PathSeparator))
-        {
-            string directory = entry.Trim().Trim('"');
-            if (string.IsNullOrWhiteSpace(directory))
-            {
-                continue;
-            }
-
-            string candidate;
-            try
-            {
-                candidate = Path.GetFullPath(Path.Combine(directory, "node.exe"));
-            }
-            catch (Exception exception) when (
-                exception is ArgumentException or
-                NotSupportedException or
-                PathTooLongException)
-            {
-                continue;
-            }
-
-            if (File.Exists(candidate) && seen.Add(candidate))
-            {
-                candidates.Add(candidate);
-            }
-        }
-
-        return candidates;
-    }
+        $"Run `clawctl setup` to extract Node.js {NodeRuntimeInstaller.Version} " +
+        "from the installed OpenClaw package.";
 
     private static async Task<string> QueryVersionAsync(
         string executablePath,

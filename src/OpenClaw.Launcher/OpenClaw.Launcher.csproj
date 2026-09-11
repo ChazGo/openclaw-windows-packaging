@@ -81,6 +81,9 @@
     <Content Include="$(MSBuildThisFileDirectory)..\..\content\openclaw\payload-files.json"
              Link="payload\payload-files.json"
              CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)..\..\content\openclaw\runtime\*.zip"
+             Link="runtime\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="ValidatePackagingContent"
@@ -90,6 +93,8 @@
            Text="Missing expanded OpenClaw application content." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\content\openclaw\payload-files.json')"
            Text="Missing content\openclaw\payload-files.json." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)..\..\content\openclaw\runtime\node-v24.16.0-win-$(Platform).zip')"
+           Text="Missing architecture-specific bundled Node.js archive." />
   </Target>
 
   <Target Name="FinalizeNativeAotPackagePayload"

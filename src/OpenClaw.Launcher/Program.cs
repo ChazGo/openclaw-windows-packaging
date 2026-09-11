@@ -167,7 +167,7 @@ internal static class Program
         Action<string> log,
         Action<string> writeError,
         TextWriter output,
-        Func<CancellationToken, Task<NodeRuntime>>? resolveNode = null)
+        Func<CancellationToken, Task<NodeRuntime>>? setupNode = null)
     {
         ClawCtlCommandParseResult parsed = ClawCtlCommandParser.Parse(args);
         if (parsed.Error is not null)
@@ -189,9 +189,19 @@ internal static class Program
                 return 0;
             case ClawCtlCommand.Setup:
             {
-                NodeRuntime nodeRuntime = await (
-                    resolveNode ?? NodeRuntimeResolver.ResolveAsync)(
+                NodeRuntime nodeRuntime;
+                if (setupNode is not null)
+                {
+                    nodeRuntime = await setupNode(CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    string archivePath = GetPackagedNodeArchivePath(options);
+                    nodeRuntime = await NodeRuntimeInstaller.EnsureInstalledAsync(
+                        archivePath,
                         CancellationToken.None).ConfigureAwait(false);
+                }
                 ClawCtlConsole.WriteNodeRuntimeSummary(output, nodeRuntime);
                 string applicationDirectory =
                     GetPackagedApplicationDirectory(options);
@@ -230,5 +240,24 @@ internal static class Program
         }
 
         return applicationDirectory;
+    }
+
+    private static string GetPackagedNodeArchivePath(HostOptions options)
+    {
+        string? archivePath = options.PackagedNodeArchivePath;
+        string expectedPath = archivePath ?? Path.Combine(
+            AppContext.BaseDirectory,
+            "runtime",
+            NodeRuntimeInstaller.GetArchiveFileName(
+                System.Runtime.InteropServices.RuntimeInformation
+                    .ProcessArchitecture));
+        if (archivePath is null || !File.Exists(archivePath))
+        {
+            throw new FileNotFoundException(
+                "The packaged Node.js runtime archive was not found.",
+                expectedPath);
+        }
+
+        return archivePath;
     }
 }

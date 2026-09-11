@@ -108,6 +108,39 @@ function Get-PackageEntrySha256 {
     }
 }
 
+function Assert-NodeArchiveEntry {
+    param(
+        [Parameter(Mandatory)]
+        [IO.Compression.ZipArchiveEntry]$Entry,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedRoot
+    )
+
+    $stream = $Entry.Open()
+    $archive = [IO.Compression.ZipArchive]::new(
+        $stream,
+        [IO.Compression.ZipArchiveMode]::Read)
+    try {
+        $nodeEntries = @(
+            $archive.Entries |
+                Where-Object {
+                    $_.FullName -ieq "$ExpectedRoot/node.exe"
+                }
+        )
+        if ($nodeEntries.Count -ne 1) {
+            throw (
+                "The Node.js archive must contain exactly one " +
+                "'$ExpectedRoot/node.exe' entry."
+            )
+        }
+    }
+    finally {
+        $archive.Dispose()
+        $stream.Dispose()
+    }
+}
+
 $resolvedArtifactsDirectory = (
     Resolve-Path -LiteralPath $ArtifactsDirectory
 ).Path
@@ -166,6 +199,10 @@ foreach ($architecture in @('x64', 'arm64')) {
         $metadata.payloadLayout -ne 'immutable-package' -or
         $metadata.payloadFileCount -isnot [int64] -or
         $metadata.payloadFileCount -le 0 -or
+        $metadata.nodeRuntimeVersion -notmatch '^\d+\.\d+\.\d+$' -or
+        $metadata.nodeRuntimeArchive -ne
+            "node-v$($metadata.nodeRuntimeVersion)-win-$architecture.zip" -or
+        $metadata.nodeRuntimeSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
         $metadata.architecture -ne $architecture -or
         $metadata.archive -ne $msix.Name -or
         $metadata.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or
@@ -193,16 +230,37 @@ foreach ($architecture in @('x64', 'arm64')) {
     try {
         # MSIX percent-encodes some names, so index decoded paths once.
         $entriesByPath = New-PackageEntryIndex -Archive $packageArchive
-        $bundledNodeEntries = @(
+        $expectedNodeArchivePath =
+            "runtime/$($metadata.nodeRuntimeArchive)"
+        $unexpectedNodeEntries = @(
             $entriesByPath.Keys |
                 Where-Object {
-                    [IO.Path]::GetFileName($_) -ieq 'node.exe' -or
-                    [IO.Path]::GetFileName($_) -match '^node-v\d'
+                    (
+                        [IO.Path]::GetFileName($_) -ieq 'node.exe' -or
+                        [IO.Path]::GetFileName($_) -match '^node-v\d'
+                    ) -and
+                    $_ -ine $expectedNodeArchivePath
                 }
         )
-        if ($bundledNodeEntries.Count -ne 0) {
-            throw "The $architecture MSIX bundles Node.js."
+        if ($unexpectedNodeEntries.Count -ne 0) {
+            throw "The $architecture MSIX has unexpected Node.js content."
         }
+        $nodeArchiveEntry = Get-PackageEntry `
+            -EntriesByPath $entriesByPath `
+            -Path $expectedNodeArchivePath
+        if (
+            (Get-PackageEntrySha256 -Entry $nodeArchiveEntry) -ine
+                $metadata.nodeRuntimeSha256
+        ) {
+            throw "The embedded $architecture Node.js archive is invalid."
+        }
+        Assert-NodeArchiveEntry `
+            -Entry $nodeArchiveEntry `
+            -ExpectedRoot (
+                [IO.Path]::GetFileNameWithoutExtension(
+                    [string]$metadata.nodeRuntimeArchive
+                )
+            )
 
         [xml]$manifest = Read-ZipEntryText `
             -EntriesByPath $entriesByPath `

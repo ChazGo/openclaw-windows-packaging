@@ -19,7 +19,7 @@ public sealed class NodeRuntimeResolverTests
     }
 
     [Fact]
-    public async Task ResolveReportsInstallCommandWhenRuntimeIsMissing()
+    public async Task ResolveReportsSetupCommandWhenRuntimeIsMissing()
     {
         InvalidOperationException exception = await Assert.ThrowsAsync<
             InvalidOperationException>(
@@ -29,8 +29,8 @@ public sealed class NodeRuntimeResolverTests
                 Architecture.X64,
                 Architecture.X64));
 
-        Assert.Contains("not found on PATH", exception.Message, StringComparison.Ordinal);
-        Assert.Contains(NodeRuntimeResolver.InstallCommand, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("has not been extracted", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("clawctl setup", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public sealed class NodeRuntimeResolverTests
                 Architecture.X64));
 
         Assert.Contains("query failed", exception.Message, StringComparison.Ordinal);
-        Assert.Contains(NodeRuntimeResolver.InstallCommand, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("clawctl setup", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]

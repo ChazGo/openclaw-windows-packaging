@@ -31,6 +31,7 @@ public sealed class HostOptionsTests : IDisposable
         HostOptions options = HostOptions.Parse([], _testDirectory);
 
         Assert.Null(options.PackagedApplicationDirectory);
+        Assert.Null(options.PackagedNodeArchivePath);
         Assert.Empty(options.OpenClawArguments);
     }
 
@@ -50,7 +51,25 @@ public sealed class HostOptionsTests : IDisposable
         Assert.Equal(
             applicationDirectory,
             options.PackagedApplicationDirectory);
+        Assert.Null(options.PackagedNodeArchivePath);
         Assert.Equal(["gateway", "run"], options.OpenClawArguments);
+    }
+
+    [Fact]
+    public void ParseResolvesArchitectureSpecificPackagedNodeArchive()
+    {
+        string runtimeDirectory = Path.Combine(_testDirectory, "runtime");
+        Directory.CreateDirectory(runtimeDirectory);
+        string archivePath = Path.Combine(
+            runtimeDirectory,
+            NodeRuntimeInstaller.GetArchiveFileName(
+                System.Runtime.InteropServices.RuntimeInformation
+                    .ProcessArchitecture));
+        File.WriteAllText(archivePath, "fixture");
+
+        HostOptions options = HostOptions.Parse([], _testDirectory);
+
+        Assert.Equal(archivePath, options.PackagedNodeArchivePath);
     }
 
     public void Dispose()

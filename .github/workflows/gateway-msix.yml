@@ -227,6 +227,16 @@ jobs:
           name: openclaw-gateway-payload-${{ matrix.architecture }}
           path: ${{ runner.temp }}\openclaw-payload
 
+      - name: Download bundled Node.js runtime
+        shell: pwsh
+        run: |
+          $archiveName = 'node-v${{ env.NODE_VERSION }}-win-${{ matrix.architecture }}.zip'
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+          $archiveUri = 'https://nodejs.org/dist/v${{ env.NODE_VERSION }}/' + $archiveName
+          Invoke-WebRequest -Uri $archiveUri -OutFile $archivePath -UseBasicParsing
+          "NODE_ARCHIVE_PATH=$archivePath" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Restore NativeAOT and MSIX dependencies
         shell: pwsh
         run: |
@@ -246,6 +256,8 @@ jobs:
 
           .\scripts\Build-MSIX.ps1 `
             -PayloadDirectory '${{ runner.temp }}\openclaw-payload' `
+            -NodeArchivePath $env:NODE_ARCHIVE_PATH `
+            -NodeVersion '${{ env.NODE_VERSION }}' `
             -Architecture '${{ matrix.architecture }}' `
             -PackageVersion $packageVersion `
             -SourceCommit '${{ github.sha }}' `
