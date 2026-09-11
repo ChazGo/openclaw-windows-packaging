@@ -69,6 +69,14 @@ internal static class GatewayLauncher
         startInfo.Environment["OPENCLAW_SUPERVISOR_MODE"] = "external";
         startInfo.Environment["OPENCLAW_SERVICE_REPAIR_POLICY"] = "external";
         startInfo.Environment["OPENCLAW_NO_AUTO_UPDATE"] = "1";
+        string? nodeDirectory = Path.GetDirectoryName(nodePath);
+        if (!string.IsNullOrEmpty(nodeDirectory))
+        {
+            startInfo.Environment.TryGetValue("PATH", out string? inheritedPath);
+            startInfo.Environment["PATH"] = string.IsNullOrEmpty(inheritedPath)
+                ? nodeDirectory
+                : $"{nodeDirectory}{Path.PathSeparator}{inheritedPath}";
+        }
         startInfo.ArgumentList.Add(entryPoint);
 
         foreach (string argument in openClawArguments)

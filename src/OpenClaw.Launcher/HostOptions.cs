@@ -24,18 +24,13 @@ internal sealed record HostOptions(
             "openclaw.mjs"))
                 ? packagedApplicationDirectory
                 : null;
-        string packagedNodeArchivePath = Path.Combine(
-            baseDirectory,
-            "runtime",
-            NodeRuntimeInstaller.GetArchiveFileName(
-                System.Runtime.InteropServices.RuntimeInformation
-                    .ProcessArchitecture));
+        string? packagedNodeArchivePath = NodeRuntimeInstaller.FindArchivePath(
+            Path.Combine(baseDirectory, "runtime"),
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
 
         return new HostOptions(
             directApplicationDirectory,
-            File.Exists(packagedNodeArchivePath)
-                ? packagedNodeArchivePath
-                : null,
+            packagedNodeArchivePath,
             [.. arguments]);
     }
 }

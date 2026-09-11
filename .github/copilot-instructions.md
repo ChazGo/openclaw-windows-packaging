@@ -60,23 +60,23 @@ and ARM64 separately.
 - `openclaw` resolves the Node.js executable extracted into package LocalState,
   confirms the packaged entry point exists, and forwards every argument
   unchanged to `openclaw.mjs`.
-- `clawctl setup` idempotently extracts the architecture-specific bundled
-  Node.js archive into versioned package LocalState and verifies the packaged
-  entry point. Runtime launches do not hash or walk application files.
+- `clawctl setup` validates and reuses or repairs the architecture-specific
+  bundled Node.js runtime in versioned package LocalState and verifies the
+  packaged entry point. Runtime launches do not hash or walk application files.
 - `GatewayLauncher` starts Node without a shell, uses `ArgumentList`, inherits
   the console streams, and sets `OPENCLAW_SUPERVISOR_MODE=external` plus
   `OPENCLAW_NO_AUTO_UPDATE=1`. The child process exit code is the launcher exit
-  code.
+  code. Only the child environment prepends the bundled runtime to `PATH`.
 - Diagnostics are written to packaged LocalState (or
   `%LOCALAPPDATA%\OpenClawGatewayMSIX` outside an MSIX context) with a named
   mutex so concurrent processes append complete records.
-- The GitHub workflow first builds and packs a pinned
-  `openclaw/openclaw` revision on Linux. Windows matrix jobs use
-  `Build-Payload.ps1` to produce x64/ARM64 expanded trees and build metadata,
-  then downloads the matching official Node.js archive and uses
-  `Build-MSIX.ps1` to reject Node.js from the application payload, build the
-  application inventory, publish the NativeAOT host, validate package
-  contents, and emit MSIX metadata including the runtime hash.
+- The GitHub workflow first builds and packs a pinned `openclaw/openclaw`
+  revision on Linux using that revision's `setup-node-env` action. The resolved
+  Node.js version flows through `source.json` and `payload-metadata.json`;
+  Windows payload builds use the same version. `Build-MSIX.ps1` downloads its
+  matching official archive, rejects Node.js from the application payload,
+  builds the application inventory, publishes the NativeAOT host, validates
+  package contents, and emits MSIX metadata including the runtime hash.
 - Unsigned artifacts are the normal PR/push output. Test signing uses a
   temporary runner-local certificate. Official signing is gated to `main` and
   the immutable upstream commit in `release-policy.json`; signing inputs are
@@ -118,6 +118,9 @@ and ARM64 separately.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, payload metadata, and signing
   validation.
+- Do not add a packaging-side Node.js version pin or support-range policy.
+  The selected upstream toolchain owns version selection; package composition
+  supplies `NodeRuntimeArchiveFileName`, and the host reads the archive name.
 - Metadata files are part of the release trust chain, not incidental build
   output. Changes to their fields must be coordinated across payload creation,
   MSIX creation, signing validation, workflow artifacts, and tests.

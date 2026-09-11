@@ -42,9 +42,13 @@ or package version logic:
 
 ```powershell
 .\scripts\Test-SigningInputs.Tests.ps1
+.\scripts\Test-NodeRuntimeInputs.Tests.ps1
 .\scripts\Test-WorkflowPackageVersion.Tests.ps1
 .\scripts\Test-GitHooks.Tests.ps1
 ```
+
+The Node.js input suite requires Node.js and npm. It builds a dependency-free
+local fixture; it does not download or build OpenClaw.
 
 Run the NativeAOT publish when you change host JSON, reflection, interop, or
 anything else that is trimming-sensitive. A JIT `dotnet build` does not

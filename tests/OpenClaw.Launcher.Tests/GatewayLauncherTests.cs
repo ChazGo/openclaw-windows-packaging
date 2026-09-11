@@ -49,6 +49,24 @@ public sealed class GatewayLauncherTests : IDisposable
     }
 
     [Fact]
+    public void CreateStartInfoPrependsBundledRuntimeOnlyToChildPath()
+    {
+        string? inheritedPath = Environment.GetEnvironmentVariable("PATH");
+        string nodeDirectory = Path.Combine(_payloadDirectory, "runtime");
+
+        var startInfo = GatewayLauncher.CreateStartInfo(
+            Path.Combine(nodeDirectory, "node.exe"),
+            _payloadDirectory,
+            []);
+
+        string expectedPath = string.IsNullOrEmpty(inheritedPath)
+            ? nodeDirectory
+            : $"{nodeDirectory}{Path.PathSeparator}{inheritedPath}";
+        Assert.Equal(expectedPath, startInfo.Environment["PATH"]);
+        Assert.Equal(inheritedPath, Environment.GetEnvironmentVariable("PATH"));
+    }
+
+    [Fact]
     public void CreateStartInfoPreservesExplicitArguments()
     {
         string[] arguments = ["status", "--json", "value with spaces"];

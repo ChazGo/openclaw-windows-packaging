@@ -26,8 +26,6 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: 24.16.0
-  PNPM_VERSION: 11.15.1
   OPENCLAW_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.openclaw_ref || '0965053fe6b9341776df147a6934b7485c60b5ca' }}
   PACKAGING_ROOT: .
 
@@ -69,6 +67,10 @@ jobs:
         run: >
           .\scripts\Test-SigningInputs.Tests.ps1
 
+      - name: Test Node.js packaging inputs
+        shell: pwsh
+        run: .\scripts\Test-NodeRuntimeInputs.Tests.ps1
+
       - name: Test workflow package version
         shell: pwsh
         run: >
@@ -85,32 +87,26 @@ jobs:
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
       package_version: ${{ steps.source.outputs.version }}
+      node_version: ${{ steps.source.outputs.node_version }}
     steps:
       - name: Check out OpenClaw source
         uses: actions/checkout@v7
         with:
           repository: openclaw/openclaw
           ref: ${{ env.OPENCLAW_REF }}
-          path: openclaw-source
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Set up upstream Node.js and pnpm
+        uses: ./.github/actions/setup-node-env
         with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack prepare "pnpm@${PNPM_VERSION}" --activate
+          install-bun: "false"
+          install-deps: "false"
 
       - name: Install dependencies
-        working-directory: openclaw-source
         run: pnpm install --frozen-lockfile
 
       - name: Build OpenClaw
-        working-directory: openclaw-source
         env:
           OPENCLAW_CONTROL_UI_RELEASE_BUILD: "1"
         run: |
@@ -119,7 +115,6 @@ jobs:
 
       - name: Pack npm package
         id: source
-        working-directory: openclaw-source
         run: |
           set -euo pipefail
           artifact_dir="${RUNNER_TEMP}/openclaw-package"
@@ -133,15 +128,18 @@ jobs:
 
           source_sha="$(git rev-parse HEAD)"
           package_version="$(node -p "require('./package.json').version")"
+          node_version="$(node -p 'process.versions.node')"
           echo "sha=${source_sha}" >> "${GITHUB_OUTPUT}"
           echo "version=${package_version}" >> "${GITHUB_OUTPUT}"
+          echo "node_version=${node_version}" >> "${GITHUB_OUTPUT}"
 
           cat > "${artifact_dir}/source.json" <<EOF
           {
             "repository": "https://github.com/openclaw/openclaw",
             "requestedRef": "${OPENCLAW_REF}",
             "resolvedCommit": "${source_sha}",
-            "packageVersion": "${package_version}"
+            "packageVersion": "${package_version}",
+            "nodeVersion": "${node_version}"
           }
           EOF
 
@@ -172,7 +170,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: ${{ needs.build-package.outputs.node_version }}
 
       - name: Download intermediate package
         uses: actions/download-artifact@v8
@@ -227,16 +225,6 @@ jobs:
           name: openclaw-gateway-payload-${{ matrix.architecture }}
           path: ${{ runner.temp }}\openclaw-payload
 
-      - name: Download bundled Node.js runtime
-        shell: pwsh
-        run: |
-          $archiveName = 'node-v${{ env.NODE_VERSION }}-win-${{ matrix.architecture }}.zip'
-          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
-          $archiveUri = 'https://nodejs.org/dist/v${{ env.NODE_VERSION }}/' + $archiveName
-          Invoke-WebRequest -Uri $archiveUri -OutFile $archivePath -UseBasicParsing
-          "NODE_ARCHIVE_PATH=$archivePath" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Restore NativeAOT and MSIX dependencies
         shell: pwsh
         run: |
@@ -256,8 +244,6 @@ jobs:
 
           .\scripts\Build-MSIX.ps1 `
             -PayloadDirectory '${{ runner.temp }}\openclaw-payload' `
-            -NodeArchivePath $env:NODE_ARCHIVE_PATH `
-            -NodeVersion '${{ env.NODE_VERSION }}' `
             -Architecture '${{ matrix.architecture }}' `
             -PackageVersion $packageVersion `
             -SourceCommit '${{ github.sha }}' `

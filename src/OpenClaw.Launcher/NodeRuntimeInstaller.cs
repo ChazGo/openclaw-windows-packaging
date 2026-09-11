@@ -1,49 +1,77 @@
 using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace OpenClaw.Launcher;
 
-internal static class NodeRuntimeInstaller
+internal static partial class NodeRuntimeInstaller
 {
-    public const string Version = "24.16.0";
+    public static string? FindArchivePath(
+        string runtimeDirectory,
+        Architecture architecture)
+    {
+        if (!Directory.Exists(runtimeDirectory))
+        {
+            return null;
+        }
 
-    public static string GetArchiveFileName(Architecture architecture) =>
-        $"node-v{Version}-win-{GetArchitectureName(architecture)}.zip";
+        string[] archives = Directory.GetFiles(
+            runtimeDirectory,
+            $"node-v*-win-{GetArchitectureName(architecture)}.zip");
+        return archives.Length switch
+        {
+            0 => null,
+            1 => archives[0],
+            _ => throw new InvalidDataException(
+                "The package contains multiple Node.js runtime archives.")
+        };
+    }
 
-    public static string GetInstallDirectory(Architecture architecture) =>
+    public static Version GetArchiveVersion(
+        string archivePath,
+        Architecture architecture)
+    {
+        Match match = ArchiveNameRegex().Match(Path.GetFileName(archivePath));
+        if (!match.Success ||
+            match.Groups["architecture"].Value != GetArchitectureName(architecture))
+        {
+            throw new InvalidDataException(
+                $"Unexpected Node.js runtime archive: {Path.GetFileName(archivePath)}");
+        }
+
+        return NodeRuntimeResolver.ParseVersion(match.Groups["version"].Value);
+    }
+
+    public static string GetInstallDirectory(string archivePath) =>
         Path.Combine(
             HostDataPaths.GetProductLocalStateRoot(),
             "NodeJS",
-            $"node-v{Version}-win-{GetArchitectureName(architecture)}");
+            Path.GetFileNameWithoutExtension(archivePath));
 
-    public static string GetExecutablePath(Architecture architecture) =>
-        Path.Combine(GetInstallDirectory(architecture), "node.exe");
-
-    public static async Task<NodeRuntime> EnsureInstalledAsync(
+    public static NodeRuntime EnsureInstalled(
         string archivePath,
-        CancellationToken cancellationToken)
+        Action<string> log)
     {
         Architecture architecture = RuntimeInformation.ProcessArchitecture;
-        string executablePath = EnsureInstalled(
+        Version version = GetArchiveVersion(archivePath, architecture);
+        return EnsureInstalled(
             archivePath,
-            GetInstallDirectory(architecture),
-            architecture);
-        return await NodeRuntimeResolver.ResolvePathAsync(
-            executablePath,
-            cancellationToken).ConfigureAwait(false);
+            GetInstallDirectory(archivePath),
+            path => NodeRuntimeResolver.ResolvePath(
+                path,
+                version),
+            log);
     }
 
-    internal static string EnsureInstalled(
+    internal static NodeRuntime EnsureInstalled(
         string archivePath,
         string installDirectory,
-        Architecture architecture)
+        Func<string, NodeRuntime> resolveNode,
+        Action<string> log)
     {
         string executablePath = Path.Combine(installDirectory, "node.exe");
-        if (File.Exists(executablePath))
-        {
-            return executablePath;
-        }
-
         if (!File.Exists(archivePath))
         {
             throw new FileNotFoundException(
@@ -51,9 +79,11 @@ internal static class NodeRuntimeInstaller
                 archivePath);
         }
 
-        string mutexName =
-            $"Local\\OpenClawGatewayMSIX.NodeRuntime.{GetArchitectureName(architecture)}";
-        using var mutex = new Mutex(initiallyOwned: false, mutexName);
+        // LocalState is shared across Windows sessions. Keep validation and
+        // publication on this thread because mutex ownership is thread-affine.
+        using var mutex = new Mutex(
+            initiallyOwned: false,
+            GetInstallMutexName(installDirectory));
         bool ownsMutex = false;
         try
         {
@@ -66,38 +96,38 @@ internal static class NodeRuntimeInstaller
                 ownsMutex = true;
             }
 
+            string stagingDirectory = $"{installDirectory}.extract";
+            if (Directory.Exists(stagingDirectory))
+            {
+                Directory.Delete(stagingDirectory, recursive: true);
+            }
+
             if (File.Exists(executablePath))
             {
-                return executablePath;
+                try
+                {
+                    return resolveNode(executablePath);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    log($"Reinstalling invalid bundled Node.js: {exception.Message}");
+                }
             }
 
-            string? parentDirectory = Path.GetDirectoryName(installDirectory);
-            if (string.IsNullOrWhiteSpace(parentDirectory))
-            {
-                throw new InvalidOperationException(
-                    "The Node.js installation path has no parent directory.");
-            }
-
-            Directory.CreateDirectory(parentDirectory);
-            string stagingDirectory =
-                $"{installDirectory}.{Guid.NewGuid():N}.extract";
             try
             {
                 ExtractRuntime(
                     archivePath,
-                    stagingDirectory,
-                    architecture);
-                if (!File.Exists(Path.Combine(stagingDirectory, "node.exe")))
-                {
-                    throw new InvalidDataException(
-                        "The packaged Node.js archive does not contain node.exe.");
-                }
+                    stagingDirectory);
+                NodeRuntime runtime = resolveNode(
+                    Path.Combine(stagingDirectory, "node.exe"));
 
                 if (Directory.Exists(installDirectory))
                 {
                     Directory.Delete(installDirectory, recursive: true);
                 }
                 Directory.Move(stagingDirectory, installDirectory);
+                return runtime with { ExecutablePath = executablePath };
             }
             finally
             {
@@ -106,8 +136,6 @@ internal static class NodeRuntimeInstaller
                     Directory.Delete(stagingDirectory, recursive: true);
                 }
             }
-
-            return executablePath;
         }
         finally
         {
@@ -118,13 +146,18 @@ internal static class NodeRuntimeInstaller
         }
     }
 
+    internal static string GetInstallMutexName(string installDirectory)
+    {
+        string identity = Path.GetFullPath(installDirectory).ToUpperInvariant();
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        return $"Global\\OpenClawGatewayMSIX.NodeRuntime.{hash}";
+    }
+
     private static void ExtractRuntime(
         string archivePath,
-        string stagingDirectory,
-        Architecture architecture)
+        string stagingDirectory)
     {
-        string archiveRoot =
-            $"node-v{Version}-win-{GetArchitectureName(architecture)}";
+        string archiveRoot = Path.GetFileNameWithoutExtension(archivePath);
         string archivePrefix = archiveRoot + "/";
         string fullStagingDirectory =
             Path.GetFullPath(stagingDirectory) + Path.DirectorySeparatorChar;
@@ -196,6 +229,11 @@ internal static class NodeRuntimeInstaller
             entry.ExtractToFile(destinationPath);
         }
     }
+
+    [GeneratedRegex(
+        @"^node-v(?<version>\d+\.\d+\.\d+)-win-(?<architecture>x64|arm64)\.zip$",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex ArchiveNameRegex();
 
     private static string GetArchitectureName(Architecture architecture) =>
         architecture switch

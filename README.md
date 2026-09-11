@@ -6,7 +6,8 @@ This repository builds a Windows MSIX package containing:
   app execution aliases;
 - a pinned, verified build of
   [`openclaw/openclaw`](https://github.com/openclaw/openclaw);
-- the official Node.js 24.16.0 archive matching the package architecture.
+- the official Node.js archive matching the upstream build's runtime version
+  and the package architecture.
 
 The package is independent from the
 [OpenClaw Windows Node and Companion](https://github.com/openclaw/openclaw-windows-node)
@@ -28,9 +29,11 @@ list, is forwarded unchanged to `node openclaw.mjs`, and the launcher returns
 the exact child exit code.
 
 Before launching, the host resolves the bundled Node.js executable previously
-prepared by `clawctl setup` and verifies its version and executable
-architecture. Device-installed Node.js and `PATH` do not affect command
-passthrough.
+prepared by `clawctl setup` and checks its PE product version and executable
+architecture against the packaged archive without a separate Node.js process.
+The runtime directory is prepended
+to the child's `PATH` so Node.js, npm, and npx subprocesses use the bundled
+tools without changing the user's environment.
 
 The expanded OpenClaw application is installed read-only inside the MSIX.
 After resolving Node.js, the launcher confirms that packaged
@@ -66,10 +69,11 @@ CLI and must be invoked through `openclaw`.
 
 `setup` extracts the architecture-specific runtime archive from the immutable
 MSIX into the package's writable LocalState:
-`%LOCALAPPDATA%\Packages\<package-family>\LocalState\OpenClaw\NodeJS\node-v24.16.0-win-<architecture>`.
+`%LOCALAPPDATA%\Packages\<package-family>\LocalState\OpenClaw\NodeJS\node-v<version>-win-<architecture>`.
 Extraction is idempotent, versioned, and serialized across concurrent setup
-processes. The launcher validates the extracted `node.exe` before reporting
-readiness.
+processes, including different Windows sessions. Setup validates existing
+runtimes before reuse, replaces invalid runtimes, and validates extraction
+before publishing it.
 
 The launcher places Node.js in a Windows job configured with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The launcher remains alive while Node.js
@@ -83,9 +87,9 @@ clawctl setup
 openclaw
 ```
 
-The packaged OpenClaw revision accepts Node.js
-`>=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0`. The launcher keeps this
-requirement in one shared validator used by `clawctl` and `openclaw`.
+When an MSIX update changes the bundled Node.js version, run `clawctl setup`
+again before launching OpenClaw. Previously extracted versions are left in
+place so an update does not remove a running process's runtime.
 
 ## Selecting the OpenClaw revision
 
@@ -100,6 +104,14 @@ Changing only the workflow-dispatch default does not change automatic builds.
 For a one-time override, run **Build OpenClaw Gateway MSIX** manually and
 provide a tag, branch, or preferably a full 40-character commit SHA in
 `openclaw_ref`.
+
+The source build uses that revision's `.github/actions/setup-node-env` action
+to select Node.js and pnpm. Its resolved Node.js version is recorded in
+`source.json`, reused for both Windows payload builds, and carried in
+`payload-metadata.json`. Package composition downloads that exact version;
+the launcher derives its runtime version and LocalState path from the bundled
+archive name. There is no separate packaging-side Node.js version pin or
+runtime-support policy.
 
 The payload artifact records the requested ref and resolved upstream commit in
 `payload-metadata.json`. That build-only file is not embedded in the MSIX.
@@ -124,14 +136,14 @@ dotnet test .\OpenClaw.Gateway.MSIX.slnx `
 ```
 
 `scripts\Build-Payload.ps1` npm-installs an OpenClaw package into an expanded,
-architecture-specific application tree. The workflow downloads the official
-Node.js archive for the same architecture. `scripts\Build-MSIX.ps1` copies the
-application tree and runtime archive into package content, rejects Node.js
+architecture-specific application tree. `scripts\Build-MSIX.ps1` downloads
+the official Node.js archive matching the payload's recorded build version
+and architecture, copies both inputs into package content, rejects Node.js
 inside the application payload, creates a per-file inventory, and then creates
 an unsigned NativeAOT MSIX.
 `scripts\Build-LocalMSIX.ps1` can reuse a successful workflow payload or a
-local payload directory; unless `-NodeArchivePath` is supplied, it downloads
-the pinned runtime archive used by CI.
+local payload directory. `-NodeArchivePath` can supply an already-downloaded
+archive, but its version and architecture must match the payload metadata.
 
 Normal pull-request and push workflows publish unsigned packages for
 validation. Manual runs support three signing modes:
@@ -156,7 +168,7 @@ key is stored in the repository.
 |---|---|
 | OpenClaw application files | Read-only MSIX package `app` directory |
 | Bundled Node.js archive | Read-only MSIX package `runtime` directory |
-| Extracted Node.js runtime | `%LOCALAPPDATA%\Packages\<package-family>\LocalState\OpenClaw\NodeJS\node-v24.16.0-win-<architecture>` |
+| Extracted Node.js runtime | `%LOCALAPPDATA%\Packages\<package-family>\LocalState\OpenClaw\NodeJS\node-v<version>-win-<architecture>` |
 | OpenClaw configuration and user state | `%USERPROFILE%\.openclaw` |
 | Launcher diagnostics | `%LOCALAPPDATA%\Packages\<package-family>\LocalState\OpenClawGatewayMSIX\Logs\openclaw.log` |
 

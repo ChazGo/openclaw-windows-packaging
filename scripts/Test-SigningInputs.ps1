@@ -170,6 +170,7 @@ if (
 
 $expectedPackagingCommit = $PackagingCommit.ToLowerInvariant()
 $expectedPackageVersion = $null
+$expectedNodeRuntimeVersion = $null
 foreach ($architecture in @('x64', 'arm64')) {
     $directory = Join-Path $resolvedArtifactsDirectory $architecture
     $metadataPath = Join-Path $directory 'msix-metadata.json'
@@ -217,6 +218,13 @@ foreach ($architecture in @('x64', 'arm64')) {
     }
     elseif ($metadata.packageVersion -ne $expectedPackageVersion) {
         throw 'The x64 and ARM64 package versions do not match.'
+    }
+
+    if ($null -eq $expectedNodeRuntimeVersion) {
+        $expectedNodeRuntimeVersion = $metadata.nodeRuntimeVersion
+    }
+    elseif ($metadata.nodeRuntimeVersion -ne $expectedNodeRuntimeVersion) {
+        throw 'The x64 and ARM64 Node.js runtime versions do not match.'
     }
 
     $actualMsixHash = (

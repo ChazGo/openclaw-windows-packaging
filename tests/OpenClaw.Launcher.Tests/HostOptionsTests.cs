@@ -55,21 +55,37 @@ public sealed class HostOptionsTests : IDisposable
         Assert.Equal(["gateway", "run"], options.OpenClawArguments);
     }
 
-    [Fact]
-    public void ParseResolvesArchitectureSpecificPackagedNodeArchive()
+    [Theory]
+    [InlineData("24.16.0")]
+    [InlineData("26.1.0")]
+    public void ParseResolvesArchitectureSpecificPackagedNodeArchive(string version)
     {
         string runtimeDirectory = Path.Combine(_testDirectory, "runtime");
         Directory.CreateDirectory(runtimeDirectory);
+        string architecture = System.Runtime.InteropServices.RuntimeInformation
+            .ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64
+                ? "x64"
+                : "arm64";
         string archivePath = Path.Combine(
             runtimeDirectory,
-            NodeRuntimeInstaller.GetArchiveFileName(
-                System.Runtime.InteropServices.RuntimeInformation
-                    .ProcessArchitecture));
+            $"node-v{version}-win-{architecture}.zip");
         File.WriteAllText(archivePath, "fixture");
 
         HostOptions options = HostOptions.Parse([], _testDirectory);
 
         Assert.Equal(archivePath, options.PackagedNodeArchivePath);
+    }
+
+    [Fact]
+    public void ArchiveDiscoveryRejectsAmbiguousVersions()
+    {
+        File.WriteAllText(Path.Combine(_testDirectory, "node-v24.16.0-win-x64.zip"), "fixture");
+        File.WriteAllText(Path.Combine(_testDirectory, "node-v26.1.0-win-x64.zip"), "fixture");
+
+        Assert.Throws<InvalidDataException>(() =>
+            NodeRuntimeInstaller.FindArchivePath(
+                _testDirectory,
+                System.Runtime.InteropServices.Architecture.X64));
     }
 
     public void Dispose()

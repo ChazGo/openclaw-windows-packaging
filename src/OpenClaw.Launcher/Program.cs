@@ -131,7 +131,8 @@ internal static class Program
         await RunAgentAsync(
             options,
             log,
-            resolveNode ?? NodeRuntimeResolver.ResolveAsync,
+            resolveNode ?? (_ => Task.FromResult(NodeRuntimeResolver.Resolve(
+                GetPackagedNodeArchivePath(options)))),
             GatewayLauncher.RunAsync).ConfigureAwait(false);
 
     // launchOpenClaw is a test seam: tests substitute a fake in place of
@@ -198,9 +199,9 @@ internal static class Program
                 else
                 {
                     string archivePath = GetPackagedNodeArchivePath(options);
-                    nodeRuntime = await NodeRuntimeInstaller.EnsureInstalledAsync(
+                    nodeRuntime = NodeRuntimeInstaller.EnsureInstalled(
                         archivePath,
-                        CancellationToken.None).ConfigureAwait(false);
+                        log);
                 }
                 ClawCtlConsole.WriteNodeRuntimeSummary(output, nodeRuntime);
                 string applicationDirectory =
@@ -247,10 +248,7 @@ internal static class Program
         string? archivePath = options.PackagedNodeArchivePath;
         string expectedPath = archivePath ?? Path.Combine(
             AppContext.BaseDirectory,
-            "runtime",
-            NodeRuntimeInstaller.GetArchiveFileName(
-                System.Runtime.InteropServices.RuntimeInformation
-                    .ProcessArchitecture));
+            "runtime");
         if (archivePath is null || !File.Exists(archivePath))
         {
             throw new FileNotFoundException(

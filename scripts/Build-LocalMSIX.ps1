@@ -7,9 +7,6 @@ param(
 
     [long]$PayloadRunId,
 
-    [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$NodeVersion = '24.16.0',
-
     [string]$NodeArchivePath,
 
     [string]$PackageVersion,
@@ -61,20 +58,7 @@ if (Test-Path -LiteralPath $OutputDirectory) {
 New-Item -Path $workDirectory -ItemType Directory -Force | Out-Null
 
 if ($NodeArchivePath) {
-    $resolvedNodeArchivePath = (
-        Resolve-Path -LiteralPath $NodeArchivePath
-    ).Path
-}
-else {
-    $nodeArchiveName = "node-v$NodeVersion-win-$Architecture.zip"
-    $resolvedNodeArchivePath = Join-Path $workDirectory $nodeArchiveName
-    $nodeArchiveUri =
-        "https://nodejs.org/dist/v$NodeVersion/$nodeArchiveName"
-    Write-Host "Downloading bundled Node.js runtime from $nodeArchiveUri."
-    Invoke-WebRequest `
-        -Uri $nodeArchiveUri `
-        -OutFile $resolvedNodeArchivePath `
-        -UseBasicParsing
+    $NodeArchivePath = (Resolve-Path -LiteralPath $NodeArchivePath).Path
 }
 
 if ($PayloadDirectory) {
@@ -157,8 +141,7 @@ try {
     Write-Host "Building unsigned MSIX version $PackageVersion."
     & .\scripts\Build-MSIX.ps1 `
         -PayloadDirectory $resolvedPayloadDirectory `
-        -NodeArchivePath $resolvedNodeArchivePath `
-        -NodeVersion $NodeVersion `
+        -NodeArchivePath $NodeArchivePath `
         -Architecture $Architecture `
         -PackageVersion $PackageVersion `
         -SourceCommit $sourceCommit `

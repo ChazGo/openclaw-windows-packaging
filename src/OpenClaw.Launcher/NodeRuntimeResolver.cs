@@ -13,100 +13,70 @@ internal sealed record NodeRuntime(
 
 internal static partial class NodeRuntimeResolver
 {
-    private static readonly TimeSpan VersionQueryTimeout = TimeSpan.FromSeconds(10);
-    private static readonly NodeVersionRange[] SupportedVersionRanges =
-    [
-        new(new Version(22, 22, 3), 23),
-        new(new Version(24, 15, 0), 25),
-        new(new Version(25, 9, 0), null)
-    ];
+    public static NodeRuntime Resolve(string archivePath) =>
+        ResolvePath(
+            Path.Combine(NodeRuntimeInstaller.GetInstallDirectory(archivePath), "node.exe"),
+            NodeRuntimeInstaller.GetArchiveVersion(
+                archivePath,
+                RuntimeInformation.ProcessArchitecture));
 
-    public static string SupportedVersions { get; } = string.Join(
-        " || ",
-        SupportedVersionRanges.Select(range =>
-            range.ExclusiveMajor is int exclusiveMajor
-                ? $">={range.Minimum} <{exclusiveMajor}"
-                : $">={range.Minimum}"));
-
-    public static Task<NodeRuntime> ResolveAsync(CancellationToken cancellationToken) =>
-        ResolvePathAsync(
-            NodeRuntimeInstaller.GetExecutablePath(
-                RuntimeInformation.ProcessArchitecture),
-            cancellationToken);
-
-    public static Task<NodeRuntime> ResolvePathAsync(
+    public static NodeRuntime ResolvePath(
         string executablePath,
-        CancellationToken cancellationToken) =>
-        ResolveAsync(
-            File.Exists(executablePath) ? [executablePath] : [],
-            QueryVersionAsync,
-            ReadArchitecture,
-            RuntimeInformation.ProcessArchitecture,
-            cancellationToken);
-
-    internal static async Task<NodeRuntime> ResolveAsync(
-        IReadOnlyList<string> candidates,
-        Func<string, CancellationToken, Task<string>> queryVersion,
-        Func<string, Architecture> readArchitecture,
-        Architecture requiredArchitecture,
-        CancellationToken cancellationToken)
+        Version expectedVersion)
     {
-        if (candidates.Count == 0)
+        if (!File.Exists(executablePath))
         {
             throw new InvalidOperationException(
                 CreateFailureMessage(
                     "The bundled Node.js runtime has not been extracted."));
         }
 
-        var failures = new List<string>();
-        foreach (string candidate in candidates)
-        {
-            try
-            {
-                string output = await queryVersion(candidate, cancellationToken)
-                    .ConfigureAwait(false);
-                Version version = ParseVersion(output);
-                if (!IsSupported(version))
-                {
-                    throw new InvalidDataException(
-                        $"version {version} is unsupported; required {SupportedVersions}");
-                }
-
-                Architecture architecture = readArchitecture(candidate);
-                if (architecture != requiredArchitecture)
-                {
-                    throw new InvalidDataException(
-                        $"architecture {architecture} does not match {requiredArchitecture}");
-                }
-
-                return new NodeRuntime(candidate, version, architecture);
-            }
-            catch (Exception exception) when (
-                exception is IOException or
-                UnauthorizedAccessException or
-                BadImageFormatException or
-                InvalidDataException or
-                InvalidOperationException or
-                TimeoutException or
-                Win32Exception)
-            {
-                failures.Add($"{candidate}: {exception.Message}");
-            }
-        }
-
-        throw new InvalidOperationException(
-            CreateFailureMessage(
-                "No compatible Node.js runtime was found. " +
-                string.Join(" ", failures)));
+        return Resolve(
+            executablePath,
+            expectedVersion,
+            ReadVersion,
+            ReadArchitecture,
+            RuntimeInformation.ProcessArchitecture);
     }
 
-    internal static bool IsSupported(Version version) =>
-        SupportedVersionRanges.Any(range =>
-            version >= range.Minimum &&
-            (
-                range.ExclusiveMajor is null ||
-                version.Major < range.ExclusiveMajor
-            ));
+    internal static NodeRuntime Resolve(
+        string executablePath,
+        Version expectedVersion,
+        Func<string, string> readVersion,
+        Func<string, Architecture> readArchitecture,
+        Architecture requiredArchitecture)
+    {
+        try
+        {
+            Version version = ParseVersion(readVersion(executablePath));
+            if (version != expectedVersion)
+            {
+                throw new InvalidDataException(
+                    $"version {version} does not match bundled version {expectedVersion}");
+            }
+
+            Architecture architecture = readArchitecture(executablePath);
+            if (architecture != requiredArchitecture)
+            {
+                throw new InvalidDataException(
+                    $"architecture {architecture} does not match {requiredArchitecture}");
+            }
+
+            return new NodeRuntime(executablePath, version, architecture);
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            UnauthorizedAccessException or
+            BadImageFormatException or
+            InvalidDataException or
+            InvalidOperationException or
+            Win32Exception)
+        {
+            throw new InvalidOperationException(
+                CreateFailureMessage($"{executablePath}: {exception.Message}"),
+                exception);
+        }
+    }
 
     internal static Version ParseVersion(string output)
     {
@@ -116,7 +86,7 @@ internal static partial class NodeRuntimeResolver
             !Version.TryParse(match.Groups["version"].Value, out Version? version))
         {
             throw new InvalidDataException(
-                $"Node.js returned an invalid version: {output.Trim()}");
+                $"Node.js has an invalid product version: {output.Trim()}");
         }
 
         return version;
@@ -124,57 +94,19 @@ internal static partial class NodeRuntimeResolver
 
     internal static string CreateFailureMessage(string detail) =>
         $"{detail}{Environment.NewLine}" +
-        $"Run `clawctl setup` to extract Node.js {NodeRuntimeInstaller.Version} " +
-        "from the installed OpenClaw package.";
+        "Run `clawctl setup` to prepare the Node.js runtime bundled " +
+        "with the installed OpenClaw package.";
 
-    private static async Task<string> QueryVersionAsync(
-        string executablePath,
-        CancellationToken cancellationToken)
+    private static string ReadVersion(string executablePath)
     {
-        var startInfo = new ProcessStartInfo
+        // Executing a staged image can keep it locked after process exit,
+        // preventing Windows from publishing the extracted directory.
+        string? version = FileVersionInfo.GetVersionInfo(executablePath).ProductVersion;
+        if (string.IsNullOrWhiteSpace(version))
         {
-            FileName = executablePath,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        startInfo.ArgumentList.Add("--version");
-
-        using Process process = Process.Start(startInfo) ??
-            throw new InvalidOperationException("Unable to start Node.js.");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken);
-        timeout.CancelAfter(VersionQueryTimeout);
-
-        try
-        {
-            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync(
-                timeout.Token);
-            Task<string> standardError = process.StandardError.ReadToEndAsync(
-                timeout.Token);
-            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-            string output = await standardOutput.ConfigureAwait(false);
-            string error = await standardError.ConfigureAwait(false);
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException(
-                    $"Node.js version query exited with code {process.ExitCode}: " +
-                    error.Trim());
-            }
-
-            return output;
+            throw new InvalidDataException("Node.js has no product version.");
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync(CancellationToken.None)
-                    .ConfigureAwait(false);
-            }
-            throw new TimeoutException("Node.js version query timed out.");
-        }
+        return version;
     }
 
     private static Architecture ReadArchitecture(string executablePath)
@@ -196,8 +128,4 @@ internal static partial class NodeRuntimeResolver
         @"^v?(?<version>\d+\.\d+\.\d+)(?:\+[0-9A-Za-z.-]+)?$",
         RegexOptions.CultureInvariant)]
     private static partial Regex NodeVersionRegex();
-
-    private sealed record NodeVersionRange(
-        Version Minimum,
-        int? ExclusiveMajor);
 }
