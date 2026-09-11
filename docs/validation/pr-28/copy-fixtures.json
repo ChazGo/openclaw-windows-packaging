@@ -1,0 +1,104 @@
+{
+  "kind": "Browser capability fixtures against the actual rendered plugin page",
+  "completedAt": "2026-09-11T03:55:15.070Z",
+  "cases": [
+    {
+      "mode": "enabled",
+      "capabilityFixture": "clipboard-api",
+      "command": "clawctl gateway-isolation disable",
+      "label": "Copied",
+      "calls": [
+        {
+          "method": "clipboard.writeText",
+          "value": "clawctl gateway-isolation disable"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "mode": "enabled",
+      "capabilityFixture": "legacy-fallback",
+      "command": "clawctl gateway-isolation disable",
+      "label": "Copied",
+      "calls": [
+        {
+          "method": "clipboard.writeText",
+          "value": "clawctl gateway-isolation disable"
+        },
+        {
+          "method": "execCommand",
+          "command": "copy",
+          "selection": "clawctl gateway-isolation disable"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "mode": "enabled",
+      "capabilityFixture": "manual-selection",
+      "command": "clawctl gateway-isolation disable",
+      "label": "Selected",
+      "calls": [
+        {
+          "method": "clipboard.writeText",
+          "value": "clawctl gateway-isolation disable"
+        },
+        {
+          "method": "execCommand",
+          "command": "copy",
+          "selection": "clawctl gateway-isolation disable"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "mode": "disabled",
+      "capabilityFixture": "clipboard-api",
+      "command": "clawctl gateway-isolation enable",
+      "label": "Copied",
+      "calls": [
+        {
+          "method": "clipboard.writeText",
+          "value": "clawctl gateway-isolation enable"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "mode": "disabled",
+      "capabilityFixture": "legacy-fallback",
+      "command": "clawctl gateway-isolation enable",
+      "label": "Copied",
+      "calls": [
+        {
+          "method": "clipboard.writeText",
+          "value": "clawctl gateway-isolation enable"
+        },
+        {
+          "method": "execCommand",
+          "command": "copy",
+          "selection": "clawctl gateway-isolation enable"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "mode": "disabled",
+      "capabilityFixture": "manual-selection",
+      "command": "clawctl gateway-isolation enable",
+      "label": "Selected",
+      "calls": [
+        {
+          "method": "clipboard.writeText",
+          "value": "clawctl gateway-isolation enable"
+        },
+        {
+          "method": "execCommand",
+          "command": "copy",
+          "selection": "clawctl gateway-isolation enable"
+        }
+      ],
+      "passed": true
+    }
+  ]
+}

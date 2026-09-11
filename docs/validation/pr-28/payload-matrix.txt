@@ -1,0 +1,625 @@
+Gateway isolation payload composition matrix
+Fixture type: synthetic local npm packages and synthetic runtime-inspection responses.
+Real operations: npm pack, npm install, scripts\Build-Payload.ps1, file copy, runtime command invocation, payload metadata.
+This matrix tests the x64 and ARM64 composition contract with controlled runtime-inspection fixtures.
+Production source: 9aa1df286c2b6fd59b4c101201ddae0ae6000324
+Evidence checkout HEAD: 2ce86d5bf4b54809ab1b4dcf5930db74d36b6d84
+Runtime: pwsh 7.6.6; Node.js v24.16.0; npm 11.13.0; Windows x64 host
+Command: $env:PATH = "<Node-v24.16.0-win-x64>;" + $env:PATH
+Command: pwsh -NoProfile -File .\scripts\validation\Test-GatewayIsolationPayloadMatrix.ps1
+All npm operations use an isolated generated cache and npm_config_offline=true; packages have no dependencies or lifecycle scripts.
+
+CASE x64-accepted-existing-environment PASS
+Command (from <TestRoot>\x64-accepted-existing-environment\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-accepted-existing-environment\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-accepted-existing-environment\package -Architecture x64 -OutputDirectory <TestRoot>\x64-accepted-existing-environment\payload
+Expected: accepted
+Actual: accepted
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection, version-smoke
+Shipping plugin files: 3; all source/payload SHA-256 hashes identical; index.test.js absent; metadata architecture: x64
+SHA256 index.js 7f98aed21bf7773f78a25c94c47d4f0f4efd6998c314201869307b798f25d1cd
+SHA256 openclaw.plugin.json a1359e966e39d799f400a7250a4366cd1ef0b0bb8be954100285a2c1da298651
+SHA256 package.json 5a4c1c3966c782455e6505dedc9427c8096917f520ca6486f169fc4db5e50142
+
+CASE x64-accepted-absent-environment PASS
+Command (from <TestRoot>\x64-accepted-absent-environment\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-accepted-absent-environment\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-accepted-absent-environment\package -Architecture x64 -OutputDirectory <TestRoot>\x64-accepted-absent-environment\payload
+Expected: accepted
+Actual: accepted
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection, version-smoke
+Shipping plugin files: 3; all source/payload SHA-256 hashes identical; index.test.js absent; metadata architecture: x64
+SHA256 index.js 7f98aed21bf7773f78a25c94c47d4f0f4efd6998c314201869307b798f25d1cd
+SHA256 openclaw.plugin.json a1359e966e39d799f400a7250a4366cd1ef0b0bb8be954100285a2c1da298651
+SHA256 package.json 5a4c1c3966c782455e6505dedc9427c8096917f520ca6486f169fc4db5e50142
+
+CASE x64-accepted-empty-environment PASS
+Command (from <TestRoot>\x64-accepted-empty-environment\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-accepted-empty-environment\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-accepted-empty-environment\package -Architecture x64 -OutputDirectory <TestRoot>\x64-accepted-empty-environment\payload
+Expected: accepted
+Actual: accepted
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection, version-smoke
+Shipping plugin files: 3; all source/payload SHA-256 hashes identical; index.test.js absent; metadata architecture: x64
+SHA256 index.js 7f98aed21bf7773f78a25c94c47d4f0f4efd6998c314201869307b798f25d1cd
+SHA256 openclaw.plugin.json a1359e966e39d799f400a7250a4366cd1ef0b0bb8be954100285a2c1da298651
+SHA256 package.json 5a4c1c3966c782455e6505dedc9427c8096917f520ca6486f169fc4db5e50142
+
+CASE x64-missing-extensions PASS
+Command (from <TestRoot>\x64-missing-extensions\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-extensions\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-extensions\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-extensions\payload
+Expected: The pinned OpenClaw payload does not expose the supported bundled plugin directory: <TestRoot>\x64-missing-extensions\runner\openclaw-stage-x64\node_modules\openclaw\dist\extensions
+Actual: The pinned OpenClaw payload does not expose the supported bundled plugin directory: <TestRoot>\x64-missing-extensions\runner\openclaw-stage-x64\node_modules\openclaw\dist\extensions
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls:
+Rejected application and payload metadata absent.
+
+CASE x64-preexisting-plugin PASS
+Command (from <TestRoot>\x64-preexisting-plugin\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-preexisting-plugin\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-preexisting-plugin\package -Architecture x64 -OutputDirectory <TestRoot>\x64-preexisting-plugin\payload
+Expected: The OpenClaw payload already contains a gateway-isolation plugin; refusing to replace upstream content.
+Actual: The OpenClaw payload already contains a gateway-isolation plugin; refusing to replace upstream content.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls:
+Rejected application and payload metadata absent.
+
+CASE x64-inspection-exit-23 PASS
+Command (from <TestRoot>\x64-inspection-exit-23\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-inspection-exit-23\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-inspection-exit-23\package -Architecture x64 -OutputDirectory <TestRoot>\x64-inspection-exit-23\payload
+Expected: The selected OpenClaw payload cannot load the Gateway isolation plugin. Exit code: 23.
+Actual: The selected OpenClaw payload cannot load the Gateway isolation plugin. Exit code: 23.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-plugin-id PASS
+Command (from <TestRoot>\x64-wrong-plugin-id\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-plugin-id\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-plugin-id\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-plugin-id\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-id PASS
+Command (from <TestRoot>\x64-missing-plugin-id\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-id\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-id\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-id\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-plugin-origin PASS
+Command (from <TestRoot>\x64-wrong-plugin-origin\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-plugin-origin\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-plugin-origin\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-plugin-origin\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-origin PASS
+Command (from <TestRoot>\x64-missing-plugin-origin\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-origin\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-origin\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-origin\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-plugin-enabled PASS
+Command (from <TestRoot>\x64-wrong-plugin-enabled\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-plugin-enabled\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-plugin-enabled\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-plugin-enabled\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-enabled PASS
+Command (from <TestRoot>\x64-missing-plugin-enabled\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-enabled\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-enabled\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-enabled\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-plugin-activated PASS
+Command (from <TestRoot>\x64-wrong-plugin-activated\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-plugin-activated\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-plugin-activated\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-plugin-activated\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-activated PASS
+Command (from <TestRoot>\x64-missing-plugin-activated\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-activated\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-activated\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-activated\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-plugin-status PASS
+Command (from <TestRoot>\x64-wrong-plugin-status\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-plugin-status\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-plugin-status\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-plugin-status\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-status PASS
+Command (from <TestRoot>\x64-missing-plugin-status\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-status\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-status\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-status\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-plugin-imported PASS
+Command (from <TestRoot>\x64-wrong-plugin-imported\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-plugin-imported\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-plugin-imported\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-plugin-imported\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-imported PASS
+Command (from <TestRoot>\x64-missing-plugin-imported\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-imported\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-imported\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-imported\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-plugin-httpRoutes PASS
+Command (from <TestRoot>\x64-wrong-plugin-httpRoutes\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-plugin-httpRoutes\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-plugin-httpRoutes\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-plugin-httpRoutes\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-httpRoutes PASS
+Command (from <TestRoot>\x64-missing-plugin-httpRoutes\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-httpRoutes\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-httpRoutes\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-httpRoutes\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-httpRouteCount PASS
+Command (from <TestRoot>\x64-wrong-httpRouteCount\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-httpRouteCount\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-httpRouteCount\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-httpRouteCount\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-httpRouteCount PASS
+Command (from <TestRoot>\x64-missing-httpRouteCount\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-httpRouteCount\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-httpRouteCount\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-httpRouteCount\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-gatewayMethods PASS
+Command (from <TestRoot>\x64-wrong-gatewayMethods\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-gatewayMethods\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-gatewayMethods\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-gatewayMethods\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-gatewayMethods PASS
+Command (from <TestRoot>\x64-missing-gatewayMethods\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-gatewayMethods\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-gatewayMethods\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-gatewayMethods\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-tools PASS
+Command (from <TestRoot>\x64-wrong-tools\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-tools\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-tools\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-tools\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-tools PASS
+Command (from <TestRoot>\x64-missing-tools\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-tools\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-tools\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-tools\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-services PASS
+Command (from <TestRoot>\x64-wrong-services\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-services\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-services\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-services\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-services PASS
+Command (from <TestRoot>\x64-missing-services\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-services\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-services\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-services\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-wrong-diagnostics PASS
+Command (from <TestRoot>\x64-wrong-diagnostics\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-wrong-diagnostics\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-wrong-diagnostics\package -Architecture x64 -OutputDirectory <TestRoot>\x64-wrong-diagnostics\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-diagnostics PASS
+Command (from <TestRoot>\x64-missing-diagnostics\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-diagnostics\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-diagnostics\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-diagnostics\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-excess-plugin-httpRoutes PASS
+Command (from <TestRoot>\x64-excess-plugin-httpRoutes\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-excess-plugin-httpRoutes\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-excess-plugin-httpRoutes\package -Architecture x64 -OutputDirectory <TestRoot>\x64-excess-plugin-httpRoutes\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-excess-httpRouteCount PASS
+Command (from <TestRoot>\x64-excess-httpRouteCount\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-excess-httpRouteCount\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-excess-httpRouteCount\package -Architecture x64 -OutputDirectory <TestRoot>\x64-excess-httpRouteCount\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE x64-missing-plugin-object PASS
+Command (from <TestRoot>\x64-missing-plugin-object\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\x64-missing-plugin-object\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\x64-missing-plugin-object\package -Architecture x64 -OutputDirectory <TestRoot>\x64-missing-plugin-object\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-accepted-existing-environment PASS
+Command (from <TestRoot>\arm64-accepted-existing-environment\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-accepted-existing-environment\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-accepted-existing-environment\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-accepted-existing-environment\payload
+Expected: accepted
+Actual: accepted
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Shipping plugin files: 3; all source/payload SHA-256 hashes identical; index.test.js absent; metadata architecture: arm64
+SHA256 index.js 7f98aed21bf7773f78a25c94c47d4f0f4efd6998c314201869307b798f25d1cd
+SHA256 openclaw.plugin.json a1359e966e39d799f400a7250a4366cd1ef0b0bb8be954100285a2c1da298651
+SHA256 package.json 5a4c1c3966c782455e6505dedc9427c8096917f520ca6486f169fc4db5e50142
+
+CASE arm64-accepted-absent-environment PASS
+Command (from <TestRoot>\arm64-accepted-absent-environment\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-accepted-absent-environment\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-accepted-absent-environment\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-accepted-absent-environment\payload
+Expected: accepted
+Actual: accepted
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Shipping plugin files: 3; all source/payload SHA-256 hashes identical; index.test.js absent; metadata architecture: arm64
+SHA256 index.js 7f98aed21bf7773f78a25c94c47d4f0f4efd6998c314201869307b798f25d1cd
+SHA256 openclaw.plugin.json a1359e966e39d799f400a7250a4366cd1ef0b0bb8be954100285a2c1da298651
+SHA256 package.json 5a4c1c3966c782455e6505dedc9427c8096917f520ca6486f169fc4db5e50142
+
+CASE arm64-accepted-empty-environment PASS
+Command (from <TestRoot>\arm64-accepted-empty-environment\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-accepted-empty-environment\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-accepted-empty-environment\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-accepted-empty-environment\payload
+Expected: accepted
+Actual: accepted
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Shipping plugin files: 3; all source/payload SHA-256 hashes identical; index.test.js absent; metadata architecture: arm64
+SHA256 index.js 7f98aed21bf7773f78a25c94c47d4f0f4efd6998c314201869307b798f25d1cd
+SHA256 openclaw.plugin.json a1359e966e39d799f400a7250a4366cd1ef0b0bb8be954100285a2c1da298651
+SHA256 package.json 5a4c1c3966c782455e6505dedc9427c8096917f520ca6486f169fc4db5e50142
+
+CASE arm64-missing-extensions PASS
+Command (from <TestRoot>\arm64-missing-extensions\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-extensions\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-extensions\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-extensions\payload
+Expected: The pinned OpenClaw payload does not expose the supported bundled plugin directory: <TestRoot>\arm64-missing-extensions\runner\openclaw-stage-arm64\node_modules\openclaw\dist\extensions
+Actual: The pinned OpenClaw payload does not expose the supported bundled plugin directory: <TestRoot>\arm64-missing-extensions\runner\openclaw-stage-arm64\node_modules\openclaw\dist\extensions
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls:
+Rejected application and payload metadata absent.
+
+CASE arm64-preexisting-plugin PASS
+Command (from <TestRoot>\arm64-preexisting-plugin\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-preexisting-plugin\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-preexisting-plugin\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-preexisting-plugin\payload
+Expected: The OpenClaw payload already contains a gateway-isolation plugin; refusing to replace upstream content.
+Actual: The OpenClaw payload already contains a gateway-isolation plugin; refusing to replace upstream content.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls:
+Rejected application and payload metadata absent.
+
+CASE arm64-inspection-exit-23 PASS
+Command (from <TestRoot>\arm64-inspection-exit-23\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-inspection-exit-23\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-inspection-exit-23\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-inspection-exit-23\payload
+Expected: The selected OpenClaw payload cannot load the Gateway isolation plugin. Exit code: 23.
+Actual: The selected OpenClaw payload cannot load the Gateway isolation plugin. Exit code: 23.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-plugin-id PASS
+Command (from <TestRoot>\arm64-wrong-plugin-id\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-plugin-id\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-plugin-id\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-plugin-id\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-id PASS
+Command (from <TestRoot>\arm64-missing-plugin-id\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-id\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-id\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-id\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-plugin-origin PASS
+Command (from <TestRoot>\arm64-wrong-plugin-origin\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-plugin-origin\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-plugin-origin\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-plugin-origin\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-origin PASS
+Command (from <TestRoot>\arm64-missing-plugin-origin\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-origin\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-origin\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-origin\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-plugin-enabled PASS
+Command (from <TestRoot>\arm64-wrong-plugin-enabled\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-plugin-enabled\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-plugin-enabled\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-plugin-enabled\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-enabled PASS
+Command (from <TestRoot>\arm64-missing-plugin-enabled\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-enabled\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-enabled\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-enabled\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-plugin-activated PASS
+Command (from <TestRoot>\arm64-wrong-plugin-activated\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-plugin-activated\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-plugin-activated\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-plugin-activated\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-activated PASS
+Command (from <TestRoot>\arm64-missing-plugin-activated\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-activated\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-activated\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-activated\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-plugin-status PASS
+Command (from <TestRoot>\arm64-wrong-plugin-status\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-plugin-status\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-plugin-status\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-plugin-status\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-status PASS
+Command (from <TestRoot>\arm64-missing-plugin-status\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-status\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-status\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-status\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-plugin-imported PASS
+Command (from <TestRoot>\arm64-wrong-plugin-imported\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-plugin-imported\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-plugin-imported\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-plugin-imported\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-imported PASS
+Command (from <TestRoot>\arm64-missing-plugin-imported\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-imported\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-imported\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-imported\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-plugin-httpRoutes PASS
+Command (from <TestRoot>\arm64-wrong-plugin-httpRoutes\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-plugin-httpRoutes\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-plugin-httpRoutes\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-plugin-httpRoutes\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-httpRoutes PASS
+Command (from <TestRoot>\arm64-missing-plugin-httpRoutes\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-httpRoutes\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-httpRoutes\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-httpRoutes\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-httpRouteCount PASS
+Command (from <TestRoot>\arm64-wrong-httpRouteCount\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-httpRouteCount\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-httpRouteCount\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-httpRouteCount\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-httpRouteCount PASS
+Command (from <TestRoot>\arm64-missing-httpRouteCount\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-httpRouteCount\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-httpRouteCount\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-httpRouteCount\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-gatewayMethods PASS
+Command (from <TestRoot>\arm64-wrong-gatewayMethods\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-gatewayMethods\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-gatewayMethods\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-gatewayMethods\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-gatewayMethods PASS
+Command (from <TestRoot>\arm64-missing-gatewayMethods\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-gatewayMethods\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-gatewayMethods\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-gatewayMethods\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-tools PASS
+Command (from <TestRoot>\arm64-wrong-tools\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-tools\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-tools\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-tools\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-tools PASS
+Command (from <TestRoot>\arm64-missing-tools\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-tools\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-tools\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-tools\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-services PASS
+Command (from <TestRoot>\arm64-wrong-services\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-services\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-services\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-services\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-services PASS
+Command (from <TestRoot>\arm64-missing-services\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-services\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-services\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-services\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-wrong-diagnostics PASS
+Command (from <TestRoot>\arm64-wrong-diagnostics\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-wrong-diagnostics\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-wrong-diagnostics\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-wrong-diagnostics\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-diagnostics PASS
+Command (from <TestRoot>\arm64-missing-diagnostics\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-diagnostics\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-diagnostics\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-diagnostics\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-excess-plugin-httpRoutes PASS
+Command (from <TestRoot>\arm64-excess-plugin-httpRoutes\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-excess-plugin-httpRoutes\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-excess-plugin-httpRoutes\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-excess-plugin-httpRoutes\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-excess-httpRouteCount PASS
+Command (from <TestRoot>\arm64-excess-httpRouteCount\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-excess-httpRouteCount\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-excess-httpRouteCount\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-excess-httpRouteCount\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+CASE arm64-missing-plugin-object PASS
+Command (from <TestRoot>\arm64-missing-plugin-object\package-source): npm pack --offline --ignore-scripts --pack-destination <TestRoot>\arm64-missing-plugin-object\package --silent
+Command: & .\scripts\Build-Payload.ps1 -PackageDirectory <TestRoot>\arm64-missing-plugin-object\package -Architecture arm64 -OutputDirectory <TestRoot>\arm64-missing-plugin-object\payload
+Expected: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Actual: The selected OpenClaw payload did not load the Gateway isolation plugin with the required read-only runtime shape.
+Environment restored: npm_config_arch, npm_config_target_arch, OPENCLAW_STATE_DIR, CLAWCTL_GATEWAY_ISOLATION, RUNNER_TEMP; working directory restored: true
+Runtime calls: runtime-inspection
+Rejected application and payload metadata absent.
+
+RESULT: 66 passed; 6 accepted; 60 rejected as expected; 0 failed.
+Harness environment and working directory restored. Generated TestRoot removed. No preexisting directories were removed.
