@@ -63,7 +63,26 @@ the read-only application directory the workspace.
 | `clawctl --version` | Print the packaged launcher version. |
 
 Bare `clawctl`, `clawctl -h`, and `clawctl --help` print help without changing
-state.
+state. `clawctl setup --help` prints help for that command alone. Help, usage,
+and completion come from
+[System.CommandLine](https://learn.microsoft.com/en-us/dotnet/standard/commandline/).
+Invalid management input is rejected with exit code `1` and a parse diagnostic
+on standard error; no readiness check runs.
+
+Help and version requests take precedence over the rest of the command line.
+`clawctl --version bogus` prints the launcher version and exits `0` rather than
+reporting `bogus`, because the version request is satisfied before the
+remaining arguments are validated. The version printed is always the packaged
+launcher's assembly version, including when the launcher is hosted by another
+process.
+
+Response-file expansion is disabled. A leading `@` has no meaning to `clawctl`
+and is reported as an unrecognized argument rather than read from disk.
+
+These parser conveniences belong to `clawctl` only. `openclaw` forwards every
+argument to the OpenClaw CLI verbatim, so a leading `@` or a directive-shaped
+token reaches that CLI uninterpreted.
+
 Commands such as `doctor`, `gateway`, and `uninstall` belong to the OpenClaw
 CLI and must be invoked through `openclaw`.
 
