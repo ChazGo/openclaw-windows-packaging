@@ -6,7 +6,7 @@ below this comment.
 Required PR title:
 type: user-facing description
 Use a parenthesized scope only when it adds clarity:
-fix(staging): launcher fails to start when the prepared payload is partial
+fix(launcher): report an actionable error when Node.js is missing
 
 Types: feat, fix, improve, refactor, docs, chore.
 For fixes, describe the user-visible symptom and trigger:
@@ -34,8 +34,8 @@ Describe the concrete user, contributor, security, or operational problem.
 For fixes, begin with:
 "Fixes an issue where users <do X> would <experience Y> when <condition>."
 
-Name the affected surface: the `openclaw.exe` launcher, payload staging, the
-MSIX package, the signing policy, or the GitHub Actions workflow. Do not
+Name the affected surface: the `openclaw.exe` launcher, packaged application,
+MSIX composition, the signing policy, or the GitHub Actions workflow. Do not
 describe the code-level cause here.
 -->
 
