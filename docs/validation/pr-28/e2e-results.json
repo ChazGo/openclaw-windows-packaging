@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-09-11T02:45:20.860Z",
+  "browser": "152.0.4191.66",
+  "browserEngine": "Microsoft Edge (headless Chromium)",
+  "launcher": "NativeAOT win-x64, unpackaged app layout",
+  "admissionBypasses": false,
+  "events": [
+    {
+      "event": "route-auth-check",
+      "anonymous": 401,
+      "authenticated": 200,
+      "cacheControl": "no-store",
+      "csp": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self'"
+    },
+    {
+      "event": "authenticated-hello-ok",
+      "version": "2026.8.2",
+      "buildId": "2026.8.2-release-0965053fe6b9-2026-09-11T00-24-39.157Z",
+      "controlUiBuildSource": "bundled"
+    },
+    {
+      "event": "control-ui-plugin-tab",
+      "state": "Disabled",
+      "sandbox": "allow-scripts",
+      "command": "clawctl gateway-isolation enable",
+      "realLauncherMode": true
+    },
+    {
+      "event": "copy-affordance",
+      "result": "Copied"
+    }
+  ]
+}
