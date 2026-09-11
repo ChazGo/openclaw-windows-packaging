@@ -113,30 +113,50 @@ test("registers one read-only Control tab and one authenticated sandbox route", 
   assert.match(response.body, />Enabled</);
 });
 
-test("keeps the launch mode stable for the plugin process", () => {
-  const env = { CLAWCTL_GATEWAY_ISOLATION: "enabled" };
-  const plugin = createGatewayIsolationPlugin(env);
-  env.CLAWCTL_GATEWAY_ISOLATION = "disabled";
-  const routes = [];
-  plugin.register({
-    session: {
-      controls: {
-        registerControlUiDescriptor() {},
+for (const initial of ["enabled", "disabled", undefined, "", "invalid", "ENABLED", " enabled "]) {
+  test(`reads ${JSON.stringify(initial) ?? "missing"} exactly once and keeps every response stable`, () => {
+    let reads = 0;
+    let value = initial;
+    const plugin = createGatewayIsolationPlugin({
+      get CLAWCTL_GATEWAY_ISOLATION() {
+        reads++;
+        return value;
       },
-    },
-    registerHttpRoute(route) {
-      routes.push(route);
-    },
+    });
+    assert.equal(reads, 1);
+    value = initial === "enabled" ? "disabled" : "enabled";
+    const routes = [];
+    plugin.register({
+      session: { controls: { registerControlUiDescriptor() {} } },
+      registerHttpRoute(route) {
+        routes.push(route);
+      },
+    });
+
+    const first = invokeRoute(routes[0]);
+    assert.equal(first.statusCode, initial === "enabled" || initial === "disabled" ? 200 : 503);
+    if (initial === "enabled") assert.match(first.body, />Enabled</);
+    if (initial === "disabled") assert.match(first.body, />Disabled</);
+    for (value of ["enabled", "disabled", "invalid", undefined]) {
+      assert.deepEqual(invokeRoute(routes[0]), first);
+    }
+    assert.equal(reads, 1);
   });
+}
 
-  const response = invokeRoute(routes[0]);
-  assert.match(response.body, />Enabled</);
-  assert.doesNotMatch(response.body, />Disabled</);
-});
-
-test("fails closed when the launcher value is missing or invalid", () => {
-  const { routes } = registerPlugin("invalid");
-  const response = invokeRoute(routes[0]);
-  assert.equal(response.statusCode, 503);
-  assert.match(response.body, /did not provide a valid Gateway isolation mode/);
-});
+for (const mode of [undefined, "", "invalid", "ENABLED", " enabled "]) {
+  const label = JSON.stringify(mode) ?? "missing";
+  test(`fails closed for ${label} with no status, command, or copy control`, () => {
+    const { routes } = registerPlugin(mode);
+    const response = invokeRoute(routes[0]);
+    assert.equal(response.statusCode, 503);
+    assert.match(response.body, /did not provide a valid Gateway isolation mode/);
+    assert.doesNotMatch(response.body, /status--(?:ok|warn)|isolation-command|<button/);
+    assert.equal(response.headers["Cache-Control"], "no-store");
+    assert.equal(response.headers["X-Content-Type-Options"], "nosniff");
+    assert.equal(response.headers["Referrer-Policy"], "no-referrer");
+  });
+  test(`renderer rejects ${label}`, () => {
+    assert.throws(() => renderGatewayIsolationPage(mode), TypeError);
+  });
+}

@@ -1,0 +1,6 @@
+PASS enabled/clipboard-api: copy success
+PASS enabled/legacy-fallback: copy success
+PASS enabled/manual-selection: manual text remains selected
+PASS disabled/clipboard-api: copy success
+PASS disabled/legacy-fallback: copy success
+PASS disabled/manual-selection: manual text remains selected

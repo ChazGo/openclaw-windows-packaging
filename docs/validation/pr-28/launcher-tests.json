@@ -1,0 +1,234 @@
+{
+  "command": "dotnet test .\\OpenClaw.Gateway.MSIX.slnx --configuration Release --no-restore",
+  "total": 57,
+  "results": [
+    {
+      "name": "OpenClaw.Launcher.Tests.HostEntrypointResolverTests.OnlyArgvZeroSelectsTheEntrypoint",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ProgramTests.SetupChecksNodeAndPackagedApplicationWithoutMutation",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostDiagnosticLogTests.WritePersistsTimestampedProcessDiagnostics",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoRejectsInvalidGatewayIsolationMode(mode: -1)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ProgramTests.AgentResolvesNodeBeforeReportingMissingApplication",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 25, minor: 8, build: 99, expected: False)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseRejectsCommandsOutsideThePublicManagementSurface(args: [\"doctor\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.WindowsKillOnCloseJobTests.FastExitRetainsExitCodeAfterDelayedObservation",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseAcceptsOnlyThePublicManagementSurface(expected: Help, args: [])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostOptionsTests.ParseForwardsAllArgumentsUnchanged",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoPreservesExplicitArguments",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ProgramTests.AgentLaunchResolvesNodeAndRunsPackagedApplication",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 23, minor: 99, build: 0, expected: False)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostOptionsTests.ParseReportsMissingPackagedApplication",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoForwardsCommandsWithoutInterpretation(arguments: [\"--update\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseAcceptsOnlyThePublicManagementSurface(expected: Setup, args: [\"setup\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlConsoleTests.WriteReadinessSummaryDescribesPackagedApplication",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoForwardsCommandsWithoutInterpretation(arguments: [\"update\", \"--yes\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 26, minor: 0, build: 0, expected: True)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoForwardsNoArgumentsUnchanged",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseRejectsCommandsOutsideThePublicManagementSurface(args: [\"verify\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 24, minor: 14, build: 99, expected: False)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseAcceptsOnlyThePublicManagementSurface(expected: Version, args: [\"--version\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoForwardsCommandsWithoutInterpretation(arguments: [\"onboard\", \"--mode\", \"local\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoRejectsInvalidGatewayIsolationMode(mode: 2147483647)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostEntrypointResolverTests.UnknownOrMalformedInvocationDefaultsToAgent",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoForwardsCommandsWithoutInterpretation(arguments: [\"setup\", \"--install-daemon\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseRejectsCommandsOutsideThePublicManagementSurface(args: [\"gateway\", \"status\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.ResolveAcceptsCompatibleRuntime",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.ResolveRejectsPrereleaseVersion",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseRejectsCommandsOutsideThePublicManagementSurface(args: [\"update-package\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoDefaultsToCurrentWorkingDirectory",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ProgramTests.SetupResolvesNodeBeforeReportingMissingApplication",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoRejectsInvalidGatewayIsolationMode(mode: 2)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseRejectsCommandsOutsideThePublicManagementSurface(args: [\"setup\", \"--force\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.ResolveRejectsIncompatibleArchitecture",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.WindowsKillOnCloseJobTests.DisposingJobTerminatesAssignedProcess",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.ResolveRejectsMalformedVersion",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlConsoleTests.WriteHelpListsOnlyThePublicCommands",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseRejectsCommandsOutsideThePublicManagementSurface(args: [\"prepare\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.ResolveReportsVersionQueryFailure",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostOptionsTests.ParseResolvesPackagedApplicationWhenEntryPointExists",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.PackageManifestTests.ManifestRegistersBothAliasesToTheSingleExecutable",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoReportsExactGatewayIsolationMode(mode: Disabled, expected: \"disabled\")",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostEntrypointResolverTests.AgentAliasSelectsThePassthroughEntrypoint",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 22, minor: 22, build: 2, expected: False)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.ClawCtlCommandTests.ParseRejectsCommandsOutsideThePublicManagementSurface(args: [\"repair\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 25, minor: 9, build: 0, expected: True)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.ResolveRejectsOutdatedRuntime",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 24, minor: 15, build: 0, expected: True)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoForwardsCommandsWithoutInterpretation(arguments: [\"gateway\", \"call\", \"update.run\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.ResolveReportsInstallCommandWhenRuntimeIsMissing",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoForwardsCommandsWithoutInterpretation(arguments: [\"gateway\", \"install\"])",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.NodeRuntimeResolverTests.SupportedVersionsMatchPackagedOpenClawRequirement(major: 22, minor: 22, build: 3, expected: True)",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostDiagnosticLogTests.ConcurrentInvocationsSerializeCompleteLogRecords",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.HostEntrypointResolverTests.ControlAliasSelectsTheManagementEntrypoint",
+      "outcome": "Passed"
+    },
+    {
+      "name": "OpenClaw.Launcher.Tests.GatewayLauncherTests.CreateStartInfoReportsExactGatewayIsolationMode(mode: Enabled, expected: \"enabled\")",
+      "outcome": "Passed"
+    }
+  ]
+}

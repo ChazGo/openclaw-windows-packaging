@@ -97,6 +97,20 @@ public sealed class GatewayLauncherTests : IDisposable
     }
 
     [Theory]
+    [InlineData(-1)]
+    [InlineData(2)]
+    [InlineData(int.MaxValue)]
+    public void CreateStartInfoRejectsInvalidGatewayIsolationMode(int mode)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            GatewayLauncher.CreateStartInfo(
+                "node",
+                _payloadDirectory,
+                [],
+                gatewayIsolationMode: (GatewayIsolationMode)mode));
+    }
+
+    [Theory]
     [InlineData("update", "--yes")]
     [InlineData("--update")]
     [InlineData("gateway", "call", "update.run")]

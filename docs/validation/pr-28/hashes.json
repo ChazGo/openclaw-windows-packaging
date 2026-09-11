@@ -12,5 +12,16 @@
     "controlUiIndex": "73ac0e6f38896c9d491b45a6c3d23b4990dae139d8ff3cb93da7a33e640bb1e7",
     "controlUiEntry": "1430574e4d89d8c43b303057d918fdba41a4a940d436d7feaf8e0122a533e4f6",
     "screenshot": "1dd7153742614febf8d00aa08c50f3c3465cdd8a7a3b4cf87e8fa585177a0142"
+  },
+  "evidenceFiles": {
+    "fixture-disabled.png": "9445d0a982b921b77113fa3889278c129b31ba2de50ea591caf2e5af40cd13b4",
+    "fixture-empty.png": "5b64cdc293b6fa1e6be4d04d5c37c7d0403293e9e8aaaf1576c3b55dcfc2a940",
+    "fixture-enabled.png": "6912ea4e768ae4a2f8fceff4a64c4f371eb44184b99b061ec6a9fe5599aa4fea",
+    "fixture-invalid.png": "5b64cdc293b6fa1e6be4d04d5c37c7d0403293e9e8aaaf1576c3b55dcfc2a940",
+    "fixture-missing.png": "5b64cdc293b6fa1e6be4d04d5c37c7d0403293e9e8aaaf1576c3b55dcfc2a940",
+    "fixture-uppercase.png": "5b64cdc293b6fa1e6be4d04d5c37c7d0403293e9e8aaaf1576c3b55dcfc2a940",
+    "fixture-whitespace.png": "5b64cdc293b6fa1e6be4d04d5c37c7d0403293e9e8aaaf1576c3b55dcfc2a940",
+    "gateway-isolation-e2e.png": "1dd7153742614febf8d00aa08c50f3c3465cdd8a7a3b4cf87e8fa585177a0142",
+    "launcher-disabled.png": "9445d0a982b921b77113fa3889278c129b31ba2de50ea591caf2e5af40cd13b4"
   }
 }
