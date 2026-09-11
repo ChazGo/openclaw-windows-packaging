@@ -142,6 +142,7 @@ internal static class Program
             nodeRuntime.ExecutablePath,
             applicationDirectory,
             options.OpenClawArguments,
+            GatewayIsolationMode.Disabled,
             CancellationToken.None,
             log);
     }
@@ -198,6 +199,7 @@ internal static class Program
         string nodePath,
         string applicationDirectory,
         IReadOnlyList<string> openClawArguments,
+        GatewayIsolationMode gatewayIsolationMode,
         CancellationToken cancellationToken,
         Action<string>? log);
 

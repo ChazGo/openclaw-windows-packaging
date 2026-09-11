@@ -41,13 +41,18 @@ copy, repair, or otherwise change package files at runtime.
 Every OpenClaw child process runs with
 `OPENCLAW_SUPERVISOR_MODE=external`,
 `OPENCLAW_SERVICE_REPAIR_POLICY=external`, and
-`OPENCLAW_NO_AUTO_UPDATE=1`. These declare external lifecycle ownership,
-prevent doctor-owned service repair, and disable configured background
-auto-updates. The pinned OpenClaw `v2026.8.2` release honors external supervisor
-mode by refusing native service mutation and OpenClaw self-update with guidance
-to use the external supervisor's workflow. This behavior belongs to upstream
-OpenClaw; the launcher does not reserve, reject, or rewrite upstream command
-arguments.
+`OPENCLAW_NO_AUTO_UPDATE=1`. It also reports the selected Windows Gateway
+session mode through the process-stable
+`CLAWCTL_GATEWAY_ISOLATION=enabled|disabled` environment variable. The current
+interactive-session launch path reports `disabled`; the future isolated-session
+launch path will select `enabled` when that session switch is implemented.
+These values declare external lifecycle ownership, prevent doctor-owned service
+repair, disable configured background auto-updates, and expose diagnostic
+isolation status without claiming independent attestation. The pinned OpenClaw
+`v2026.8.2` release honors external supervisor mode by refusing native service
+mutation and OpenClaw self-update with guidance to use the external supervisor's
+workflow. This behavior belongs to upstream OpenClaw; the launcher does not
+reserve, reject, or rewrite upstream command arguments.
 OpenClaw inherits the terminal's working directory; the launcher does not make
 the read-only application directory the workspace.
 
@@ -100,7 +105,10 @@ both:
 Changing only the workflow-dispatch default does not change automatic builds.
 For a one-time override, run **Build OpenClaw Gateway MSIX** manually and
 provide a tag, branch, or preferably a full 40-character commit SHA in
-`openclaw_ref`.
+`openclaw_ref`. Payload composition validates that the selected OpenClaw
+runtime can discover and load the packaging-owned Gateway Isolation plugin
+with its required read-only route shape; incompatible older refs fail instead
+of producing a package without status UI.
 
 The payload artifact records the requested ref and resolved upstream commit in
 `payload-metadata.json`. That build-only file is not embedded in the MSIX.
@@ -125,9 +133,14 @@ dotnet test .\OpenClaw.Gateway.MSIX.slnx `
 ```
 
 `scripts\Build-Payload.ps1` npm-installs an OpenClaw package into an expanded,
-architecture-specific application tree. `scripts\Build-MSIX.ps1` copies that
-tree into package content, rejects any Node.js executable or runtime archive,
-creates a per-file inventory, and then creates an unsigned NativeAOT MSIX.
+architecture-specific application tree and provisions the packaging-owned,
+enabled-by-default Gateway Isolation plugin into OpenClaw's bundled plugin
+directory. The plugin adds a read-only **Gateway Isolation** tab to the Control
+group and serves it through an authenticated, sandboxed plugin route. It reads
+only the launch-time `CLAWCTL_GATEWAY_ISOLATION` value and registers no mutation
+RPC or process control. `scripts\Build-MSIX.ps1` copies that tree into package
+content, rejects any Node.js executable or runtime archive, creates a per-file
+inventory, and then creates an unsigned NativeAOT MSIX.
 `scripts\Build-LocalMSIX.ps1` can reuse a successful workflow payload or a
 local payload directory. The Node.js used by the payload build jobs is build
 infrastructure only and is not copied into the MSIX.
