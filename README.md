@@ -129,12 +129,15 @@ The payload artifact records the requested ref and resolved upstream commit in
 OpenClaw commit, while embedded `payload-files.json` records every packaged
 application file's path, length, and SHA-256.
 
-`release-policy.json` records the immutable OpenClaw commit approved for
-official signing. Updating that policy requires a reviewed repository change.
-Official signing runs only from `main` and verifies the workflow input, both
+`release-policy.json` records the immutable OpenClaw commit and payload version
+approved for official signing, plus the independent MSIX package version and
+release tag. Updating that
+policy requires a reviewed repository change. Official signing runs only from
+`main` and verifies the workflow input, policy-approved package version, both
 architecture metadata files, both MSIX hashes, the embedded manifests, and
-every file against the embedded application inventory before requesting Azure
-credentials.
+every file against the embedded application inventory. It also byte-compares
+the bundle's embedded packages with those authorized standalone packages before
+requesting Azure credentials.
 
 ## Build and test
 
@@ -162,13 +165,32 @@ validation. Manual runs support three signing modes:
   temporary self-signed certificate plus the public `.cer` needed for local
   installation;
 - `official` requires the approved immutable commit from
-  `release-policy.json` and may run only from `main`.
+  `release-policy.json`, may run only from `main`, and publishes the signed
+  packages as permanent assets on a GitHub Release named by the policy.
 
 Official signing uses the protected `release-signing` environment, Azure OIDC,
 and the existing OpenClaw Artifact Signing account and certificate profile.
 Test-signing private keys are generated only on the temporary GitHub runner
 and are deleted before artifacts are uploaded. No signing secret or private
 key is stored in the repository.
+
+Official releases use the independent four-part numeric `packageVersion` and
+`releaseTag` from `release-policy.json`. The initial signing proof uses package
+version `0.0.0.0` and tag `v0.0.0.0`; a later policy change can establish the
+long-term Gateway-to-MSIX version mapping. The workflow creates the tag in this
+repository and a GitHub Release with generated release notes. Each release
+contains a signed, multi-architecture
+`OpenClawGateway-<version>.msixbundle` as the recommended download, plus signed
+`OpenClawGateway-<version>-x64.msix` and
+`OpenClawGateway-<version>-arm64.msix` packages for architecture-specific
+deployment. The duplicate GitHub Actions artifacts remain short-lived transport
+and diagnostic copies.
+
+An `.msixbundle` is a single installable container for the x64 and ARM64 MSIX
+packages; Windows selects the package appropriate for the device. An
+`.appinstaller` file is separate update-channel metadata rather than an
+alternative package format. This repository does not publish one yet, so GitHub
+Release installs do not opt devices into automatic update checks.
 
 ### Official signing setup
 
