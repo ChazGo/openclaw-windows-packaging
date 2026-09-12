@@ -7,11 +7,17 @@ const THEME_BRIDGE_SCRIPT = `<script>
     card: "--card",
     elevated: "--button-bg",
     text: "--text",
+    "text-strong": "--text-strong",
     muted: "--muted",
     border: "--border",
+    "border-strong": "--border-strong",
     accent: "--focus",
     ok: "--ok-text",
     warn: "--warn-text",
+    radius: "--radius",
+    "radius-full": "--radius-full",
+    "font-body": "--font-body",
+    "font-mono": "--font-mono",
   };
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return;
@@ -69,11 +75,16 @@ export function renderGatewayIsolationPage(mode) {
   <style>
     :root {
       color-scheme: light dark;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      --radius: 10px;
+      --radius-full: 9999px;
       --bg: #ffffff;
       --card: #f6f8fa;
       --border: #d0d7de;
+      --border-strong: #afb8c1;
       --text: #1f2328;
+      --text-strong: #1f2328;
       --muted: #59636e;
       --ok-bg: #dafbe1;
       --ok-text: #116329;
@@ -102,6 +113,7 @@ export function renderGatewayIsolationPage(mode) {
       margin: 0;
       background: var(--bg);
       color: var(--text);
+      font-family: var(--font-body);
       font-size: 14px;
     }
     main {
@@ -111,6 +123,7 @@ export function renderGatewayIsolationPage(mode) {
     }
     h1 {
       margin: 0 0 8px;
+      color: var(--text-strong);
       font-size: 20px;
       font-weight: 650;
     }
@@ -122,7 +135,7 @@ export function renderGatewayIsolationPage(mode) {
     .settings-section {
       overflow: hidden;
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: var(--radius);
       background: var(--card);
     }
     .settings-row {
@@ -134,7 +147,7 @@ export function renderGatewayIsolationPage(mode) {
     }
     .settings-row + .settings-row { border-top: 1px solid var(--border); }
     .settings-row--stacked { align-items: start; }
-    .settings-row__title { font-weight: 600; }
+    .settings-row__title { color: var(--text-strong); font-weight: 600; }
     .settings-row__description {
       margin-top: 5px;
       color: var(--muted);
@@ -145,7 +158,7 @@ export function renderGatewayIsolationPage(mode) {
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      border-radius: 999px;
+      border-radius: var(--radius-full);
       padding: 5px 10px;
       font-weight: 600;
     }
@@ -164,20 +177,20 @@ export function renderGatewayIsolationPage(mode) {
       align-items: center;
       gap: 8px;
       border: 1px solid var(--border);
-      border-radius: 7px;
+      border-radius: var(--radius);
       padding: 8px 9px;
       background: var(--bg);
     }
     code {
       min-width: 0;
       overflow-wrap: anywhere;
-      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-family: var(--font-mono);
       font-size: 13px;
     }
     button {
       flex: none;
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: var(--radius);
       padding: 5px 9px;
       background: var(--button-bg);
       color: var(--text);
@@ -267,9 +280,13 @@ function renderGatewayIsolationUnavailablePage() {
   <style>
     :root {
       color-scheme: light dark;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      --radius: 10px;
+      --radius-full: 9999px;
       --bg: #ffffff;
       --text: #1f2328;
+      --text-strong: #1f2328;
       --muted: #59636e;
     }
     @media (prefers-color-scheme: dark) {
@@ -284,9 +301,10 @@ function renderGatewayIsolationUnavailablePage() {
       padding: 24px;
       background: var(--bg);
       color: var(--text);
+      font-family: var(--font-body);
       font-size: 14px;
     }
-    h1 { margin: 0 0 8px; font-size: 20px; }
+    h1 { margin: 0 0 8px; color: var(--text-strong); font-size: 20px; }
     p { margin: 0; color: var(--muted); line-height: 1.5; }
   </style>
 </head>

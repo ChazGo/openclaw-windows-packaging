@@ -141,9 +141,15 @@ test("applies recognized host theme tokens from the parent frame", () => {
         text: "#fefefe",
         muted: "#aaaaaa",
         border: "#404040",
+        "border-strong": "#505050",
         accent: "#55aaff",
         ok: "#44cc77",
         warn: "#e0a020",
+        radius: "14px",
+        "radius-full": "9999px",
+        "font-body": "Georgia, serif",
+        "font-mono": "Consolas, monospace",
+        "text-strong": "#ffffff",
       },
     },
   });
@@ -154,7 +160,12 @@ test("applies recognized host theme tokens from the parent frame", () => {
   assert.equal(bridge.properties.get("--card"), "#202020");
   assert.equal(bridge.properties.get("--button-bg"), "#303030");
   assert.equal(bridge.properties.get("--text"), "#fefefe");
+  assert.equal(bridge.properties.get("--text-strong"), "#ffffff");
   assert.equal(bridge.properties.get("--focus"), "#55aaff");
+  assert.equal(bridge.properties.get("--radius"), "14px");
+  assert.equal(bridge.properties.get("--radius-full"), "9999px");
+  assert.equal(bridge.properties.get("--font-body"), "Georgia, serif");
+  assert.equal(bridge.properties.get("--font-mono"), "Consolas, monospace");
   assert.match(bridge.properties.get("--ok-bg"), /#44cc77 18%, #202020/);
   assert.match(bridge.properties.get("--warn-bg"), /#e0a020 18%, #202020/);
 });
