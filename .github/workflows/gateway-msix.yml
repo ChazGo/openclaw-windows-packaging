@@ -84,6 +84,11 @@ jobs:
         run: >
           .\scripts\Test-SigningInputs.Tests.ps1
 
+      - name: Test signing workflow configuration
+        shell: pwsh
+        run: >
+          .\scripts\Test-WorkflowSigningConfiguration.ps1
+
       - name: Test workflow package version
         shell: pwsh
         run: >
@@ -404,9 +409,9 @@ jobs:
       - name: Azure login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign MSIX packages
         uses: azure/artifact-signing-action@v2
@@ -416,6 +421,7 @@ jobs:
           certificate-profile-name: openclaw
           files-folder: artifacts
           files-folder-filter: msix
+          files-folder-recurse: true
           files-folder-depth: 2
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
