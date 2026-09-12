@@ -1,6 +1,6 @@
 {
   "id": "gateway-isolation",
-  "name": "Gateway Isolation",
+  "name": "Windows Launcher",
   "description": "Reports the Windows launch mode selected for the running Gateway.",
   "enabledByDefault": true,
   "enabledByDefaultOnPlatforms": [

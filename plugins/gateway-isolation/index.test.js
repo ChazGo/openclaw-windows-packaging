@@ -112,7 +112,7 @@ for (const expected of [
 ]) {
   test(`renders the exact ${expected.mode} read-only status`, () => {
     const html = renderGatewayIsolationPage(expected.mode);
-    assert.match(html, /Gateway Isolation/);
+    assert.match(html, /Windows Launcher/);
     assert.match(html, /Reported Gateway Isolation/);
     assert.match(html, new RegExp(`>${expected.status}<`));
     assert.match(html, /Change with CLI/);
@@ -201,7 +201,7 @@ test("registers one read-only Control tab and one authenticated sandbox route", 
   assert.deepEqual(descriptors[0], {
     surface: "tab",
     id: "gateway-isolation",
-    label: "Gateway Isolation",
+    label: "Windows Launcher",
     description: "Read-only Windows Gateway isolation status.",
     icon: "shield-check",
     group: "control",

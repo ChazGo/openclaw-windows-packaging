@@ -71,7 +71,7 @@ export function renderGatewayIsolationPage(mode) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gateway Isolation</title>
+  <title>Windows Launcher</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -213,9 +213,9 @@ export function renderGatewayIsolationPage(mode) {
 </head>
 <body>
   <main>
-    <h1>Gateway Isolation</h1>
+    <h1>Windows Launcher</h1>
     <p class="intro">Diagnostic launch mode reported by the Windows launcher.</p>
-    <section class="settings-section" aria-label="Gateway Isolation">
+    <section class="settings-section" aria-label="Windows Launcher">
       <div class="settings-row">
         <div class="settings-row__title">Reported Gateway Isolation</div>
         <div class="settings-row__control">
@@ -276,7 +276,7 @@ function renderGatewayIsolationUnavailablePage() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gateway Isolation unavailable</title>
+  <title>Windows Launcher unavailable</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -309,7 +309,7 @@ function renderGatewayIsolationUnavailablePage() {
   </style>
 </head>
 <body>
-  <h1>Gateway Isolation unavailable</h1>
+  <h1>Windows Launcher unavailable</h1>
   <p>The Windows launcher did not provide a valid Gateway isolation mode.</p>
   ${THEME_BRIDGE_SCRIPT}
 </body>
@@ -333,13 +333,13 @@ export function createGatewayIsolationPlugin(env = process.env) {
 
   return {
     id: "gateway-isolation",
-    name: "Gateway Isolation",
+    name: "Windows Launcher",
     description: "Reports the Windows launch mode selected for the running Gateway.",
     register(api) {
       api.session.controls.registerControlUiDescriptor({
         surface: "tab",
         id: "gateway-isolation",
-        label: "Gateway Isolation",
+        label: "Windows Launcher",
         description: "Read-only Windows Gateway isolation status.",
         icon: "shield-check",
         group: "control",
