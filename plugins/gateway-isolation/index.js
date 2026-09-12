@@ -1,5 +1,49 @@
 const ISOLATION_ENVIRONMENT_VARIABLE = "CLAWCTL_GATEWAY_ISOLATION";
 const STATUS_PATH = "/plugins/gateway-isolation/status";
+const THEME_MESSAGE_TYPE = "openclaw:widget-theme";
+const THEME_BRIDGE_SCRIPT = `<script>
+  const themeTokenProperties = {
+    surface: "--bg",
+    card: "--card",
+    elevated: "--button-bg",
+    text: "--text",
+    muted: "--muted",
+    border: "--border",
+    accent: "--focus",
+    ok: "--ok-text",
+    warn: "--warn-text",
+  };
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (
+      !message ||
+      message.type !== "${THEME_MESSAGE_TYPE}" ||
+      (message.mode !== "light" && message.mode !== "dark") ||
+      !message.tokens ||
+      typeof message.tokens !== "object"
+    ) return;
+    const root = document.documentElement;
+    root.dataset.themeMode = message.mode;
+    root.style.colorScheme = message.mode;
+    for (const [token, property] of Object.entries(themeTokenProperties)) {
+      const value = message.tokens[token];
+      if (typeof value === "string" && value.trim() && value.length <= 256) {
+        root.style.setProperty(property, value);
+      }
+    }
+    const styles = getComputedStyle(root);
+    const card = styles.getPropertyValue("--card").trim();
+    const ok = styles.getPropertyValue("--ok-text").trim();
+    const warn = styles.getPropertyValue("--warn-text").trim();
+    if (card && ok) {
+      root.style.setProperty("--ok-bg", "color-mix(in srgb, " + ok + " 18%, " + card + ")");
+    }
+    if (card && warn) {
+      root.style.setProperty("--warn-bg", "color-mix(in srgb, " + warn + " 18%, " + card + ")");
+    }
+  });
+</script>`;
 
 export function readGatewayIsolationMode(env) {
   const value = env[ISOLATION_ENVIRONMENT_VARIABLE];
@@ -36,6 +80,7 @@ export function renderGatewayIsolationPage(mode) {
       --warn-bg: #fff8c5;
       --warn-text: #7d4e00;
       --button-bg: #f6f8fa;
+      --focus: #0969da;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -49,6 +94,7 @@ export function renderGatewayIsolationPage(mode) {
         --warn-bg: #2e240d;
         --warn-text: #e3b341;
         --button-bg: #21262d;
+        --focus: #58a6ff;
       }
     }
     * { box-sizing: border-box; }
@@ -143,7 +189,7 @@ export function renderGatewayIsolationPage(mode) {
       color: var(--muted);
       font-size: 12px;
     }
-    button:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+    button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
     @media (max-width: 620px) {
       main { padding: 16px; }
       .settings-row { grid-template-columns: 1fr; gap: 12px; }
@@ -176,6 +222,7 @@ export function renderGatewayIsolationPage(mode) {
       </div>
     </section>
   </main>
+  ${THEME_BRIDGE_SCRIPT}
   <script>
     const button = document.getElementById("copy-command");
     const command = document.getElementById("isolation-command");
@@ -206,6 +253,47 @@ export function renderGatewayIsolationPage(mode) {
       }
     });
   </script>
+</body>
+</html>`;
+}
+
+function renderGatewayIsolationUnavailablePage() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gateway Isolation unavailable</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #ffffff;
+      --text: #1f2328;
+      --muted: #59636e;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --text: #f0f6fc;
+        --muted: #8b949e;
+      }
+    }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+    }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    p { margin: 0; color: var(--muted); line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>Gateway Isolation unavailable</h1>
+  <p>The Windows launcher did not provide a valid Gateway isolation mode.</p>
+  ${THEME_BRIDGE_SCRIPT}
 </body>
 </html>`;
 }
@@ -250,7 +338,7 @@ export function createGatewayIsolationPlugin(env = process.env) {
             writeHtmlResponse(
               response,
               503,
-              "<!doctype html><title>Gateway Isolation unavailable</title><p>The Windows launcher did not provide a valid Gateway isolation mode.</p>",
+              renderGatewayIsolationUnavailablePage(),
             );
             return true;
           }

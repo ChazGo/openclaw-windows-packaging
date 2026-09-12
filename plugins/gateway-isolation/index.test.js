@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import vm from "node:vm";
 import {
   createGatewayIsolationPlugin,
   readGatewayIsolationMode,
@@ -51,6 +52,42 @@ function invokeRoute(route) {
   return result;
 }
 
+function runThemeBridge(html) {
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.ok(scripts.length >= 1);
+  const properties = new Map();
+  const root = {
+    dataset: {},
+    style: {
+      colorScheme: "",
+      setProperty(name, value) {
+        properties.set(name, value);
+      },
+    },
+  };
+  const parent = {};
+  let listener;
+  const context = {
+    document: { documentElement: root },
+    getComputedStyle() {
+      return {
+        getPropertyValue(name) {
+          return properties.get(name) ?? "";
+        },
+      };
+    },
+    window: {
+      parent,
+      addEventListener(type, callback) {
+        if (type === "message") listener = callback;
+      },
+    },
+  };
+  vm.runInNewContext(scripts[0][1], context);
+  assert.equal(typeof listener, "function");
+  return { listener, parent, properties, root };
+}
+
 test("accepts only the exact launcher isolation values", () => {
   assert.equal(readGatewayIsolationMode({ CLAWCTL_GATEWAY_ISOLATION: "enabled" }), "enabled");
   assert.equal(readGatewayIsolationMode({ CLAWCTL_GATEWAY_ISOLATION: "disabled" }), "disabled");
@@ -85,9 +122,68 @@ for (const expected of [
     assert.match(html, /aria-label="Copy command"/);
     assert.match(html, /Copy the selected command manually\./);
     assert.match(html, /copied = document\.execCommand\("copy"\)/);
+    assert.match(html, /openclaw:widget-theme/);
     assert.doesNotMatch(html, /next manual Gateway restart/i);
   });
 }
+
+test("applies recognized host theme tokens from the parent frame", () => {
+  const bridge = runThemeBridge(renderGatewayIsolationPage("enabled"));
+  bridge.listener({
+    source: bridge.parent,
+    data: {
+      type: "openclaw:widget-theme",
+      mode: "dark",
+      tokens: {
+        surface: "#101010",
+        card: "#202020",
+        elevated: "#303030",
+        text: "#fefefe",
+        muted: "#aaaaaa",
+        border: "#404040",
+        accent: "#55aaff",
+        ok: "#44cc77",
+        warn: "#e0a020",
+      },
+    },
+  });
+
+  assert.equal(bridge.root.dataset.themeMode, "dark");
+  assert.equal(bridge.root.style.colorScheme, "dark");
+  assert.equal(bridge.properties.get("--bg"), "#101010");
+  assert.equal(bridge.properties.get("--card"), "#202020");
+  assert.equal(bridge.properties.get("--button-bg"), "#303030");
+  assert.equal(bridge.properties.get("--text"), "#fefefe");
+  assert.equal(bridge.properties.get("--focus"), "#55aaff");
+  assert.match(bridge.properties.get("--ok-bg"), /#44cc77 18%, #202020/);
+  assert.match(bridge.properties.get("--warn-bg"), /#e0a020 18%, #202020/);
+});
+
+test("ignores theme messages from other frames and malformed host values", () => {
+  const bridge = runThemeBridge(renderGatewayIsolationPage("disabled"));
+  for (const event of [
+    {
+      source: {},
+      data: { type: "openclaw:widget-theme", mode: "light", tokens: { surface: "#fff" } },
+    },
+    {
+      source: bridge.parent,
+      data: { type: "other", mode: "light", tokens: { surface: "#fff" } },
+    },
+    {
+      source: bridge.parent,
+      data: { type: "openclaw:widget-theme", mode: "sepia", tokens: { surface: "#fff" } },
+    },
+    {
+      source: bridge.parent,
+      data: { type: "openclaw:widget-theme", mode: "light", tokens: null },
+    },
+  ]) {
+    bridge.listener(event);
+  }
+  assert.equal(bridge.root.style.colorScheme, "");
+  assert.deepEqual([...bridge.properties], []);
+});
 
 test("registers one read-only Control tab and one authenticated sandbox route", () => {
   const { descriptors, routes } = registerPlugin("enabled");
@@ -152,6 +248,19 @@ for (const mode of [undefined, "", "invalid", "ENABLED", " enabled "]) {
     assert.equal(response.statusCode, 503);
     assert.match(response.body, /did not provide a valid Gateway isolation mode/);
     assert.doesNotMatch(response.body, /status--(?:ok|warn)|isolation-command|<button/);
+    const bridge = runThemeBridge(response.body);
+    bridge.listener({
+      source: bridge.parent,
+      data: {
+        type: "openclaw:widget-theme",
+        mode: "dark",
+        tokens: { surface: "#101010", text: "#fefefe", muted: "#aaaaaa" },
+      },
+    });
+    assert.equal(bridge.root.style.colorScheme, "dark");
+    assert.equal(bridge.properties.get("--bg"), "#101010");
+    assert.equal(bridge.properties.get("--text"), "#fefefe");
+    assert.equal(bridge.properties.get("--muted"), "#aaaaaa");
     assert.equal(response.headers["Cache-Control"], "no-store");
     assert.equal(response.headers["X-Content-Type-Options"], "nosniff");
     assert.equal(response.headers["Referrer-Policy"], "no-referrer");
