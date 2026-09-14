@@ -91,6 +91,11 @@ jobs:
         run: >
           .\scripts\Test-WorkflowSigningConfiguration.ps1
 
+      - name: Test OpenClaw build identity validation
+        shell: pwsh
+        run: >
+          .\scripts\Test-OpenClawBuildIdentity.Tests.ps1
+
       - name: Test workflow package version
         shell: pwsh
         run: >
@@ -114,6 +119,12 @@ jobs:
       package_version: ${{ steps.source.outputs.version }}
       node_version: ${{ steps.source.outputs.node_version }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          path: packaging-source
+          persist-credentials: false
+
       - name: Check out OpenClaw source
         uses: actions/checkout@v7
         with:
@@ -134,9 +145,13 @@ jobs:
       - name: Build OpenClaw
         env:
           OPENCLAW_CONTROL_UI_RELEASE_BUILD: "1"
-        run: |
-          pnpm build
-          pnpm ui:build
+        run: pnpm build
+
+      - name: Validate OpenClaw build identities
+        shell: pwsh
+        run: >
+          ./packaging-source/scripts/Test-OpenClawBuildIdentity.ps1
+          -OpenClawDirectory ./openclaw-source
 
       - name: Pack npm package
         id: source
