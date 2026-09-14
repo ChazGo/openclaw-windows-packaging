@@ -101,13 +101,11 @@ for (const expected of [
     mode: "enabled",
     status: "Enabled",
     tone: "status--ok",
-    command: "clawctl gateway-isolation disable",
   },
   {
     mode: "disabled",
     status: "Disabled",
     tone: "status--warn",
-    command: "clawctl gateway-isolation enable",
   },
 ]) {
   test(`renders the exact ${expected.mode} read-only status`, () => {
@@ -116,13 +114,8 @@ for (const expected of [
     assert.match(html, /Gateway Isolation/);
     assert.match(html, new RegExp(`>${expected.status}<`));
     assert.match(html, new RegExp(expected.tone));
-    assert.match(html, /Change with CLI/);
-    assert.match(html, /Run from the signed-in user session on the Gateway host\./);
-    assert.match(html, new RegExp(expected.command));
-    assert.match(html, /aria-label="Copy command"/);
-    assert.match(html, /Copy the selected command manually\./);
-    assert.match(html, /copied = document\.execCommand\("copy"\)/);
     assert.match(html, /openclaw:widget-theme/);
+    assert.doesNotMatch(html, /Change with CLI|clipboard|copy-command|clawctl gateway-isolation/);
     assert.doesNotMatch(html, /next manual Gateway restart/i);
   });
 }

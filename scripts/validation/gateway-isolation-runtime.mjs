@@ -286,7 +286,7 @@ async function themeSnapshot(page, frame, expectedTheme, expectedMode) {
   assert.equal(plugin.h1, "Windows Launcher");
   assert.equal(plugin.status, "Disabled");
   assert.equal(plugin.row, "Gateway Isolation");
-  assert.equal(plugin.mutationGuidance, true);
+  assert.equal(plugin.mutationGuidance, false);
   return { hostTheme: expectedTheme, mode: expectedMode, tokens: plugin.values };
 }
 
@@ -351,15 +351,6 @@ const context = await browser.newContext({
 const page = await context.newPage();
 let hello;
 const rpcErrors = [];
-const browserErrors = [];
-page.on("console", (message) => {
-  if (message.type() === "error") {
-    browserErrors.push(`console: ${message.text()}`);
-  }
-});
-page.on("pageerror", (error) => {
-  browserErrors.push(`page: ${error.message}`);
-});
 page.on("websocket", (socket) =>
   socket.on("framereceived", ({ payload }) => {
     const frame = JSON.parse(payload.toString());
@@ -431,9 +422,10 @@ try {
         if (method === "GET") {
           canonicalBody = body;
           assert.match(body, />Disabled</);
-          assert.match(body, /Change with CLI/);
-          assert.match(body, /clawctl gateway-isolation enable/);
-          assert.match(body, /aria-label="Copy command"/);
+          assert.doesNotMatch(
+            body,
+            /Change with CLI|clipboard|copy-command|clawctl gateway-isolation/,
+          );
         }
       }
       httpResults.push({ method, access, status: response.status });
@@ -452,13 +444,7 @@ try {
   }
 
   await page.goto(`${base}/#token=${token}`, { waitUntil: "domcontentloaded" });
-  try {
-    await until(() => Boolean(hello), "authenticated hello-ok");
-  } catch (error) {
-    throw new Error(
-      `${error.message}\nGateway logs:\n${logs}\nBrowser errors:\n${browserErrors.join("\n")}`,
-    );
-  }
+  await until(() => Boolean(hello), "authenticated hello-ok");
   assert.equal(hello.buildId, build.buildId);
   assert.equal(hello.controlUiBuildSource, "bundled");
   await pause(2_000);
@@ -599,7 +585,7 @@ try {
       sameFrameAcrossLiveThemeSwitches: true,
     },
     themes: themeResults,
-    cliControlPresent: true,
+    unsupportedCliGuidanceAbsent: true,
     passed: true,
   };
   const json = `${JSON.stringify(result, null, 2)}\n`;
