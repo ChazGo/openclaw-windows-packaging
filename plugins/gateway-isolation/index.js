@@ -180,7 +180,7 @@ export function renderGatewayIsolationPage(mode) {
     <p class="intro">Diagnostic launch mode reported by the Windows launcher.</p>
     <section class="settings-section" aria-label="Windows Launcher">
       <div class="settings-row">
-        <div class="settings-row__title">Reported Gateway Isolation</div>
+        <div class="settings-row__title">Gateway Isolation</div>
         <div class="settings-row__control">
           <span class="status status--${tone}">${status}</span>
         </div>

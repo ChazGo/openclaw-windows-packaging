@@ -285,7 +285,7 @@ async function themeSnapshot(page, frame, expectedTheme, expectedMode) {
   assert.equal(plugin.mode, expectedMode);
   assert.equal(plugin.h1, "Windows Launcher");
   assert.equal(plugin.status, "Disabled");
-  assert.equal(plugin.row, "Reported Gateway Isolation");
+  assert.equal(plugin.row, "Gateway Isolation");
   assert.equal(plugin.mutationGuidance, false);
   return { hostTheme: expectedTheme, mode: expectedMode, tokens: plugin.values };
 }
@@ -465,7 +465,7 @@ try {
   });
   assert.ok(pluginFrame, "Plugin frame did not mount.");
   await pluginFrame
-    .getByText("Reported Gateway Isolation", { exact: true })
+    .getByText("Gateway Isolation", { exact: true })
     .waitFor({ state: "visible" });
   assert.equal(visibleFrameRequests.length, 1);
 

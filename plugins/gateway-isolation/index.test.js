@@ -111,7 +111,7 @@ for (const expected of [
   test(`renders the exact ${expected.mode} read-only status`, () => {
     const html = renderGatewayIsolationPage(expected.mode);
     assert.match(html, /Windows Launcher/);
-    assert.match(html, /Reported Gateway Isolation/);
+    assert.match(html, /Gateway Isolation/);
     assert.match(html, new RegExp(`>${expected.status}<`));
     assert.match(html, new RegExp(expected.tone));
     assert.match(html, /openclaw:widget-theme/);
