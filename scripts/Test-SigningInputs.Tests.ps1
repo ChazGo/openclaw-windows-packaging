@@ -35,6 +35,8 @@ function New-TestArtifact {
 
         [bool]$SourceTreeDirty = $false,
 
+        [string]$NodeRuntimeVersion = '24.16.0',
+
         [bool]$IncludeBundledNode = $false,
 
         [bool]$IncludeApplicationBundledNode = $false,
@@ -133,6 +135,37 @@ function New-TestArtifact {
             -LiteralPath (Join-Path $runtimeDirectory 'node.exe') `
             -Value 'bundled-node'
     }
+    else {
+        $runtimeDirectory = Join-Path $staging 'runtime'
+        New-Item -Path $runtimeDirectory -ItemType Directory | Out-Null
+    }
+    $nodeRuntimeArchive =
+        "node-v$nodeRuntimeVersion-win-$Architecture.zip"
+    $nodeRuntimePath = Join-Path $runtimeDirectory $nodeRuntimeArchive
+    $nodeRuntimeZip = [IO.Compression.ZipFile]::Open(
+        $nodeRuntimePath,
+        [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $nodeRuntimeRoot = [IO.Path]::GetFileNameWithoutExtension(
+            $nodeRuntimeArchive
+        )
+        $nodeEntry = $nodeRuntimeZip.CreateEntry(
+            "$nodeRuntimeRoot/node.exe"
+        )
+        $nodeWriter = [IO.StreamWriter]::new($nodeEntry.Open())
+        try {
+            $nodeWriter.Write('bundled-node')
+        }
+        finally {
+            $nodeWriter.Dispose()
+        }
+    }
+    finally {
+        $nodeRuntimeZip.Dispose()
+    }
+    $nodeRuntimeHash = (
+        Get-FileHash -LiteralPath $nodeRuntimePath -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
 
     $msixName = "OpenClawGateway-$Architecture.msix"
     $msixPath = Join-Path $directory $msixName
@@ -153,6 +186,9 @@ function New-TestArtifact {
         payloadPackageVersion = $PayloadPackageVersion
         payloadLayout = 'immutable-package'
         payloadFileCount = $payloadFiles.Count
+        nodeRuntimeVersion = $nodeRuntimeVersion
+        nodeRuntimeArchive = $nodeRuntimeArchive
+        nodeRuntimeSha256 = $nodeRuntimeHash
         architecture = $Architecture
         archive = $msixName
         sha256 = $msixHash
@@ -336,6 +372,21 @@ try {
     Reset-TestArtifacts
     Invoke-PolicyValidation -Root $testRoot
 
+    Remove-Item -LiteralPath $testRoot -Recurse -Force
+    New-Item -Path $testRoot -ItemType Directory | Out-Null
+    New-TestArtifact -Root $testRoot -Architecture x64 -NodeRuntimeVersion '26.1.0'
+    New-TestArtifact -Root $testRoot -Architecture arm64 -NodeRuntimeVersion '26.1.0'
+    Invoke-PolicyValidation -Root $testRoot
+
+    Remove-Item -LiteralPath $testRoot -Recurse -Force
+    New-Item -Path $testRoot -ItemType Directory | Out-Null
+    New-TestArtifact -Root $testRoot -Architecture x64
+    New-TestArtifact -Root $testRoot -Architecture arm64 -NodeRuntimeVersion '26.1.0'
+    Assert-Fails `
+        -MessagePattern 'Node.js runtime versions do not match' `
+        -Action { Invoke-PolicyValidation -Root $testRoot }
+
+    Reset-TestArtifacts
     Assert-Fails `
         -MessagePattern 'approved immutable OpenClaw commit' `
         -Action {
@@ -391,7 +442,7 @@ try {
         -IncludeBundledNode $true
     New-TestArtifact -Root $testRoot -Architecture arm64
     Assert-Fails `
-        -MessagePattern 'x64 MSIX bundles Node.js' `
+        -MessagePattern 'x64 MSIX has unexpected Node.js content' `
         -Action {
             Invoke-PolicyValidation -Root $testRoot
         }
@@ -404,7 +455,7 @@ try {
         -IncludeApplicationBundledNode $true
     New-TestArtifact -Root $testRoot -Architecture arm64
     Assert-Fails `
-        -MessagePattern 'x64 MSIX bundles Node.js' `
+        -MessagePattern 'x64 MSIX has unexpected Node.js content' `
         -Action {
             Invoke-PolicyValidation -Root $testRoot
         }
@@ -417,7 +468,7 @@ try {
         -IncludeApplicationNodeArchive $true
     New-TestArtifact -Root $testRoot -Architecture arm64
     Assert-Fails `
-        -MessagePattern 'x64 MSIX bundles Node.js' `
+        -MessagePattern 'x64 MSIX has unexpected Node.js content' `
         -Action {
             Invoke-PolicyValidation -Root $testRoot
         }

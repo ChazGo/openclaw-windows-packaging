@@ -18,7 +18,7 @@ public sealed class ClawCtlCommandLineTests
         using var error = new StringWriter();
 
         int exitCode = await Program.RunControlAsync(
-            new HostOptions(null, []),
+            new HostOptions(null, null, []),
             args,
             _ => { },
             output,
@@ -51,21 +51,15 @@ public sealed class ClawCtlCommandLineTests
     }
 
     [Fact]
-    public async Task HelpDescribesReadinessAndTheNodePrerequisite()
+    public async Task HelpDescribesBundledRuntimePreparation()
     {
         (_, string output, _) = await RunAsync("--help").ConfigureAwait(true);
         string help = Normalize(output);
 
         Assert.Contains("setup", help, StringComparison.Ordinal);
         Assert.Contains("--version", help, StringComparison.Ordinal);
-        Assert.Contains(
-            Normalize(NodeRuntimeResolver.SupportedVersions),
-            help,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            Normalize(NodeRuntimeResolver.InstallCommand),
-            help,
-            StringComparison.Ordinal);
+        Assert.Contains("bundled Node.js", help, StringComparison.Ordinal);
+        Assert.Contains("clawctl setup", help, StringComparison.Ordinal);
         Assert.Contains("openclaw <arguments>", help, StringComparison.Ordinal);
     }
 
@@ -83,7 +77,7 @@ public sealed class ClawCtlCommandLineTests
     }
 
     [Fact]
-    public async Task SetupHelpDescribesTheReadOnlyCheckWithoutRunningIt()
+    public async Task SetupHelpDescribesRuntimePreparationWithoutRunningIt()
     {
         (int exitCode, string output, string error) =
             await RunAsync("setup", "--help").ConfigureAwait(true);

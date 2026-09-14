@@ -57,10 +57,12 @@ and ARM64 separately.
   app execution alias and declares the `OpenClaw.Gateway` MSIX identity.
 - The package contains an expanded, read-only OpenClaw application tree.
   `HostOptions` resolves `app\openclaw.mjs` directly from the package.
-- `openclaw` resolves device-installed Node.js, confirms the packaged entry
-  point exists, and forwards every argument unchanged to `openclaw.mjs`.
-- `clawctl setup` is a read-only readiness check for compatible Node.js and the
-  packaged entry point. Runtime launches do not hash or walk package files.
+- `openclaw` resolves the Node.js executable extracted into package LocalState,
+  confirms the packaged entry point exists, and forwards every argument
+  unchanged to `openclaw.mjs`.
+- `clawctl setup` validates and reuses or repairs the architecture-specific
+  bundled Node.js runtime in versioned package LocalState and verifies the
+  packaged entry point. Runtime launches do not hash or walk application files.
 - `clawctl` parses its own arguments with System.CommandLine
   (`ClawCtlCommandLine` builds the tree; `Program.RunControlAsync` invokes it).
   Help, usage, version, and completion are library behavior; parse errors exit
@@ -70,16 +72,17 @@ and ARM64 separately.
 - `GatewayLauncher` starts Node without a shell, uses `ArgumentList`, inherits
   the console streams, and sets `OPENCLAW_SUPERVISOR_MODE=external` plus
   `OPENCLAW_NO_AUTO_UPDATE=1`. The child process exit code is the launcher exit
-  code.
+  code. Only the child environment prepends the bundled runtime to `PATH`.
 - Diagnostics are written to packaged LocalState (or
   `%LOCALAPPDATA%\OpenClawGatewayMSIX` outside an MSIX context) with a named
   mutex so concurrent processes append complete records.
-- The GitHub workflow first builds and packs a pinned
-  `openclaw/openclaw` revision on Linux. Windows matrix jobs use
-  `Build-Payload.ps1` to produce x64/ARM64 expanded trees and build metadata,
-  then `Build-MSIX.ps1` to reject bundled Node.js, build the application
-  inventory, publish the NativeAOT host, validate package contents, and emit
-  MSIX metadata.
+- The GitHub workflow first builds and packs a pinned `openclaw/openclaw`
+  revision on Linux using that revision's `setup-node-env` action. The resolved
+  Node.js version flows through `source.json` and `payload-metadata.json`;
+  Windows payload builds use the same version. `Build-MSIX.ps1` downloads its
+  matching official archive, rejects Node.js from the application payload,
+  builds the application inventory, publishes the NativeAOT host, validates
+  package contents, and emits MSIX metadata including the runtime hash.
 - Unsigned artifacts are the normal PR/push output. Test signing uses a
   temporary runner-local certificate. Official signing is gated to `main` and
   the immutable upstream commit in `release-policy.json`; signing inputs are
@@ -111,15 +114,19 @@ and ARM64 separately.
 - Treat launcher arguments as OpenClaw-owned. Do not add host-only switches,
   consume `--`, rewrite arguments, or block upstream commands; tests explicitly
   protect transparent forwarding.
-- Preserve direct execution from the immutable package and the caller's
-  working directory. Do not add runtime extraction, copying, hashing, or
-  inventory walks.
+- Preserve direct execution of `app\openclaw.mjs` from the immutable package
+  and the caller's working directory. Node.js extraction belongs only to
+  `clawctl setup` and targets versioned package LocalState; do not copy the
+  OpenClaw application payload.
 - The build-time inventory is a release trust boundary. Keep safe unique paths,
   lengths, and SHA-256 values synchronized across composition and signing
   validation.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, payload metadata, and signing
   validation.
+- Do not add a packaging-side Node.js version pin or support-range policy.
+  The selected upstream toolchain owns version selection; package composition
+  supplies `NodeRuntimeArchiveFileName`, and the host reads the archive name.
 - Official releases combine the x64 and ARM64 packages into one signed
   `.msixbundle` while retaining signed standalone packages for explicit
   architecture-specific deployment. Compose the bundle before signing; bundle

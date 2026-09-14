@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory)]
     [string]$PayloadDirectory,
 
+    [string]$NodeArchivePath,
+
     [Parameter(Mandatory)]
     [ValidateSet('x64', 'arm64')]
     [string]$Architecture,
@@ -129,6 +131,36 @@ function Assert-ApplicationHasNoReparsePoints {
     }
 }
 
+function Assert-NodeArchive {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedRoot
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $nodeEntries = @(
+            $archive.Entries |
+                Where-Object {
+                    $_.FullName -ieq "$ExpectedRoot/node.exe"
+                }
+        )
+        if ($nodeEntries.Count -ne 1) {
+            throw (
+                "The Node.js archive must contain exactly one " +
+                "'$ExpectedRoot/node.exe' entry."
+            )
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Add-VswhereToPath {
     if (Get-Command vswhere.exe -CommandType Application -ErrorAction SilentlyContinue) {
         return
@@ -149,7 +181,6 @@ function Add-VswhereToPath {
 }
 
 Test-PackageVersion
-Add-VswhereToPath
 
 $PayloadDirectory = (Resolve-Path -LiteralPath $PayloadDirectory).Path
 $payloadApplication = Join-Path $PayloadDirectory 'app'
@@ -166,12 +197,26 @@ if (
     $payloadInfo.repository -ne 'https://github.com/openclaw/openclaw' -or
     $payloadInfo.architecture -ne $Architecture -or
     $payloadInfo.layout -ne 'expanded-directory' -or
+    $payloadInfo.nodeVersion -isnot [string] -or
+    $payloadInfo.nodeVersion -notmatch '^v?\d+\.\d+\.\d+$' -or
     [string]::IsNullOrWhiteSpace([string]$payloadInfo.packageVersion) -or
     $payloadInfo.requestedRef -isnot [string] -or
     [string]::IsNullOrWhiteSpace($payloadInfo.requestedRef) -or
     $payloadInfo.resolvedCommit -notmatch '^[0-9a-fA-F]{40}$'
 ) {
     throw 'Payload metadata is not valid for this MSIX package.'
+}
+
+$nodeVersion = $payloadInfo.nodeVersion.TrimStart('v')
+$expectedNodeArchiveName = "node-v$nodeVersion-win-$Architecture.zip"
+if ($NodeArchivePath) {
+    $NodeArchivePath = (Resolve-Path -LiteralPath $NodeArchivePath).Path
+    if ([IO.Path]::GetFileName($NodeArchivePath) -cne $expectedNodeArchiveName) {
+        throw (
+            'NodeArchivePath must match the payload build runtime: ' +
+            $expectedNodeArchiveName
+        )
+    }
 }
 
 if (-not (Test-Path `
@@ -185,6 +230,10 @@ Assert-ApplicationDoesNotBundleNode -Path $payloadApplication
 $contentRoot = Join-Path $repositoryRoot 'content'
 $openClawContent = Join-Path $contentRoot 'openclaw'
 $applicationTarget = Join-Path $openClawContent 'app'
+$runtimeTargetDirectory = Join-Path $openClawContent 'runtime'
+$nodeArchiveTarget = Join-Path `
+    $runtimeTargetDirectory `
+    $expectedNodeArchiveName
 New-Item -Path $openClawContent -ItemType Directory -Force | Out-Null
 
 if (
@@ -197,6 +246,22 @@ if (
         -Destination $applicationTarget `
         -Recurse
 }
+
+New-Item -Path $runtimeTargetDirectory -ItemType Directory -Force | Out-Null
+if (-not $NodeArchivePath) {
+    $archiveUri = "https://nodejs.org/dist/v$nodeVersion/$expectedNodeArchiveName"
+    Write-Host "Downloading bundled Node.js runtime from $archiveUri."
+    Invoke-WebRequest -Uri $archiveUri -OutFile $nodeArchiveTarget
+}
+elseif ($NodeArchivePath -ne $nodeArchiveTarget) {
+    Copy-Item -LiteralPath $NodeArchivePath -Destination $nodeArchiveTarget -Force
+}
+Assert-NodeArchive `
+    -Path $nodeArchiveTarget `
+    -ExpectedRoot ([IO.Path]::GetFileNameWithoutExtension($expectedNodeArchiveName))
+$nodeArchiveHash = (
+    Get-FileHash -LiteralPath $nodeArchiveTarget -Algorithm SHA256
+).Hash.ToLowerInvariant()
 
 $payloadSymbols = @(
     # MSBuild's own AppxPackagePayload step strips .pdb files when it later
@@ -264,6 +329,7 @@ New-Item `
     Out-Null
 
 try {
+    Add-VswhereToPath
     $appxOutput = $msixBuildDirectory.TrimEnd('\') + '\'
     Write-Host "Building unsigned NativeAOT win-$Architecture MSIX with MSBuild."
     Invoke-CheckedCommand `
@@ -278,6 +344,7 @@ try {
                 -p:PublishAot=true `
                 -p:SelfContained=true `
                 -p:IncludePackagingContent=true `
+                "-p:NodeRuntimeArchiveFileName=$expectedNodeArchiveName" `
                 -p:GenerateAppxPackageOnBuild=true `
                 "-p:AssemblyVersion=$PackageVersion" `
                 "-p:FileVersion=$PackageVersion" `
@@ -327,6 +394,12 @@ try {
                     -LiteralPath $payloadInventoryPath `
                     -Algorithm SHA256
             ).Hash.ToLowerInvariant()
+        }
+    )
+    $expectedPackageFiles.Add(
+        "runtime/$expectedNodeArchiveName",
+        [pscustomobject]@{
+            Hash = $nodeArchiveHash
         }
     )
     $packageEntries = [System.Collections.Generic.HashSet[string]]::new(
@@ -418,17 +491,20 @@ try {
     if (-not $packageEntries.Contains('openclaw.exe')) {
         throw 'The MSIX does not contain the NativeAOT host executable.'
     }
-    $bundledNodeEntries = @(
+    $unexpectedNodeEntries = @(
         $packageEntries |
             Where-Object {
-                [IO.Path]::GetFileName($_) -ieq 'node.exe' -or
-                [IO.Path]::GetFileName($_) -match '^node-v\d'
+                (
+                    [IO.Path]::GetFileName($_) -ieq 'node.exe' -or
+                    [IO.Path]::GetFileName($_) -match '^node-v\d'
+                ) -and
+                $_ -ine "runtime/$expectedNodeArchiveName"
             }
     )
-    if ($bundledNodeEntries.Count -ne 0) {
+    if ($unexpectedNodeEntries.Count -ne 0) {
         throw (
-            'The MSIX must not bundle Node.js: ' +
-            (($bundledNodeEntries | Sort-Object) -join ', ')
+            'The MSIX contains unexpected Node.js content: ' +
+            (($unexpectedNodeEntries | Sort-Object) -join ', ')
         )
     }
     foreach ($managedHostArtifact in @(
@@ -465,6 +541,9 @@ try {
         payloadPackageVersion = [string]$payloadInfo.packageVersion
         payloadLayout = 'immutable-package'
         payloadFileCount = $payloadFiles.Count
+        nodeRuntimeVersion = $nodeVersion
+        nodeRuntimeArchive = $expectedNodeArchiveName
+        nodeRuntimeSha256 = $nodeArchiveHash
         architecture = $Architecture
         archive = $msixName
         sha256 = $msixHash

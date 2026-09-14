@@ -20,7 +20,7 @@ public sealed class ClawCtlParserDefaultsTests : IDisposable
         using var output = new StringWriter();
 
         int exitCode = await Program.RunControlAsync(
-            new HostOptions(null, []),
+            new HostOptions(null, null, []),
             args,
             _ => { },
             output,

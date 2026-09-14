@@ -22,24 +22,19 @@ internal static class ClawCtlCommandLine
         ResponseFileTokenReplacer = null
     };
 
-    // Node guidance is part of help rather than only a launch-time failure so
-    // that a user can discover the prerequisite before running anything.
+    // Setup guidance is available without preparing the runtime.
     public static string RootDescription =>
-        "Verify that this device can run the packaged OpenClaw application." +
+        "Prepare the bundled Node.js runtime and verify the packaged OpenClaw application." +
         Environment.NewLine +
         Environment.NewLine +
-        $"Prerequisite: install Node.js {NodeRuntimeResolver.SupportedVersions}." +
-        Environment.NewLine +
-        $"  {NodeRuntimeResolver.InstallCommand}" +
+        "Run `clawctl setup` to extract or repair the bundled runtime." +
         Environment.NewLine +
         Environment.NewLine +
         "Run `openclaw <arguments>` to invoke the OpenClaw CLI.";
 
     public static string SetupDescription =>
-        "Check for a compatible Node.js runtime and confirm the packaged " +
-        "OpenClaw application is present. Reads only; changes nothing." +
-        Environment.NewLine +
-        $"Requires Node.js {NodeRuntimeResolver.SupportedVersions}.";
+        "Extract or repair the bundled Node.js runtime in package LocalState " +
+        "and confirm the packaged OpenClaw application is present.";
 
     // runSetup stays a delegate so the command tree owns parsing and help while
     // Program keeps the readiness operation and its test seams.

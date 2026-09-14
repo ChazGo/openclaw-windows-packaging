@@ -42,9 +42,13 @@ or package version logic:
 
 ```powershell
 .\scripts\Test-SigningInputs.Tests.ps1
+.\scripts\Test-NodeRuntimeInputs.Tests.ps1
 .\scripts\Test-WorkflowPackageVersion.Tests.ps1
 .\scripts\Test-GitHooks.Tests.ps1
 ```
+
+The Node.js input suite requires Node.js and npm. It builds a dependency-free
+local fixture; it does not download or build OpenClaw.
 
 Run the NativeAOT publish when you change host JSON, reflection, interop, or
 anything else that is trimming-sensitive. A JIT `dotnet build` does not
@@ -167,9 +171,10 @@ bypassable, and required CI checks remain authoritative.
   consume `--`, rewrite arguments, or block upstream commands. The
   System.CommandLine tree covers `clawctl` only; the `openclaw` entrypoint must
   keep forwarding its argument vector without parsing it.
-- Preserve direct execution from the read-only MSIX package. `clawctl setup`
-  is a readiness check; do not add runtime extraction, copying, repair, or
-  launcher-managed package state under the user profile.
+- Preserve direct execution of `app\openclaw.mjs` from the read-only MSIX
+  package. `clawctl setup` owns idempotent extraction of the bundled Node.js
+  archive into versioned package LocalState; do not copy the OpenClaw
+  application payload or use device-installed Node.js.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, and signing validation.
 - Metadata files are part of the release trust chain. Coordinate changes across

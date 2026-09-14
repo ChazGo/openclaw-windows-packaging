@@ -7,6 +7,8 @@ param(
 
     [long]$PayloadRunId,
 
+    [string]$NodeArchivePath,
+
     [string]$PackageVersion,
 
     [string]$OutputDirectory
@@ -54,6 +56,10 @@ if (Test-Path -LiteralPath $OutputDirectory) {
     )
 }
 New-Item -Path $workDirectory -ItemType Directory -Force | Out-Null
+
+if ($NodeArchivePath) {
+    $NodeArchivePath = (Resolve-Path -LiteralPath $NodeArchivePath).Path
+}
 
 if ($PayloadDirectory) {
     $resolvedPayloadDirectory = (Resolve-Path -LiteralPath $PayloadDirectory).Path
@@ -135,6 +141,7 @@ try {
     Write-Host "Building unsigned MSIX version $PackageVersion."
     & .\scripts\Build-MSIX.ps1 `
         -PayloadDirectory $resolvedPayloadDirectory `
+        -NodeArchivePath $NodeArchivePath `
         -Architecture $Architecture `
         -PackageVersion $PackageVersion `
         -SourceCommit $sourceCommit `

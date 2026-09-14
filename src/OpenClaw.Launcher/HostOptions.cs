@@ -2,6 +2,7 @@ namespace OpenClaw.Launcher;
 
 internal sealed record HostOptions(
     string? PackagedApplicationDirectory,
+    string? PackagedNodeArchivePath,
     IReadOnlyList<string> OpenClawArguments)
 {
     public static HostOptions Parse(IReadOnlyList<string> arguments) =>
@@ -23,9 +24,13 @@ internal sealed record HostOptions(
             "openclaw.mjs"))
                 ? packagedApplicationDirectory
                 : null;
+        string? packagedNodeArchivePath = NodeRuntimeInstaller.FindArchivePath(
+            Path.Combine(baseDirectory, "runtime"),
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
 
         return new HostOptions(
             directApplicationDirectory,
+            packagedNodeArchivePath,
             [.. arguments]);
     }
 }

@@ -6,7 +6,7 @@ internal static class ClawCtlConsole
         TextWriter output,
         NodeRuntime runtime) =>
         output.WriteLine(
-            $"Using Node.js {runtime.Version} from {runtime.ExecutablePath}");
+            $"Bundled Node.js {runtime.Version} is ready at {runtime.ExecutablePath}");
 
     public static void WriteReadinessSummary(
         TextWriter output,

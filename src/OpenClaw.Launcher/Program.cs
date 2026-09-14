@@ -112,7 +112,8 @@ internal static class Program
                 : await RunAgentAsync(
                     options,
                     WriteDiagnostic,
-                    startup.ResolveNode ?? NodeRuntimeResolver.ResolveAsync,
+                    startup.ResolveNode ?? (_ => Task.FromResult(NodeRuntimeResolver.Resolve(
+                        GetPackagedNodeArchivePath(options)))),
                     startup.LaunchOpenClaw ?? GatewayLauncher.RunAsync)
                     .ConfigureAwait(false);
         }
@@ -141,7 +142,8 @@ internal static class Program
         await RunAgentAsync(
             options,
             log,
-            resolveNode ?? NodeRuntimeResolver.ResolveAsync,
+            resolveNode ?? (_ => Task.FromResult(NodeRuntimeResolver.Resolve(
+                GetPackagedNodeArchivePath(options)))),
             GatewayLauncher.RunAsync).ConfigureAwait(false);
 
     // launchOpenClaw is a test seam: tests substitute a fake in place of
@@ -216,9 +218,17 @@ internal static class Program
         Func<CancellationToken, Task<NodeRuntime>>? resolveNode,
         CancellationToken cancellationToken)
     {
-        NodeRuntime nodeRuntime = await (
-            resolveNode ?? NodeRuntimeResolver.ResolveAsync)(
-                cancellationToken).ConfigureAwait(false);
+        NodeRuntime nodeRuntime;
+        if (resolveNode is not null)
+        {
+            nodeRuntime = await resolveNode(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            nodeRuntime = NodeRuntimeInstaller.EnsureInstalled(
+                GetPackagedNodeArchivePath(options),
+                log);
+        }
         ClawCtlConsole.WriteNodeRuntimeSummary(output, nodeRuntime);
         string applicationDirectory = GetPackagedApplicationDirectory(options);
         log("Confirmed the packaged OpenClaw application is present.");
@@ -250,5 +260,21 @@ internal static class Program
         }
 
         return applicationDirectory;
+    }
+
+    private static string GetPackagedNodeArchivePath(HostOptions options)
+    {
+        string? archivePath = options.PackagedNodeArchivePath;
+        string expectedPath = archivePath ?? Path.Combine(
+            AppContext.BaseDirectory,
+            "runtime");
+        if (archivePath is null || !File.Exists(archivePath))
+        {
+            throw new FileNotFoundException(
+                "The packaged Node.js runtime archive was not found.",
+                expectedPath);
+        }
+
+        return archivePath;
     }
 }

@@ -28,7 +28,7 @@
     injects is fixture-owned, including an explicit temporary diagnostic path
     and Node/launch delegates that cannot start a real process.
 
-    Scenarios that require a compatible device-installed Node.js runtime are
+    Scenarios that require a real bundled Node.js runtime are
     deliberately excluded. Those stay in the xUnit suite, where the runtime is
     injected, so this gate does not depend on the agent's installed Node
     version. The publish output lives under a temporary directory that this

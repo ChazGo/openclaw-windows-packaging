@@ -23,6 +23,22 @@ if (-not (Test-Path $sourceMetadataPath -PathType Leaf)) {
     throw "Missing source metadata: $sourceMetadataPath"
 }
 
+$sourceMetadata = Get-Content $sourceMetadataPath -Raw | ConvertFrom-Json
+$nodeVersion = & node -p 'process.versions.node'
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw 'Unable to determine the payload build Node.js version.'
+}
+if ($sourceMetadata.nodeVersion -cne $nodeVersion) {
+    throw (
+        "Payload Node.js $nodeVersion does not match the source build " +
+        "version '$($sourceMetadata.nodeVersion)'."
+    )
+}
+$npmVersion = & npm --version
+if ($LASTEXITCODE -ne 0) {
+    throw 'Unable to determine the payload build npm version.'
+}
+
 $stagingDirectory = Join-Path $env:RUNNER_TEMP "openclaw-stage-$Architecture"
 Remove-Item $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $stagingDirectory -ItemType Directory | Out-Null
@@ -105,16 +121,15 @@ Copy-Item `
     -Destination $applicationDirectory `
     -Recurse
 
-$sourceMetadata = Get-Content $sourceMetadataPath -Raw | ConvertFrom-Json
 [ordered]@{
     repository       = $sourceMetadata.repository
     requestedRef     = $sourceMetadata.requestedRef
     resolvedCommit   = $sourceMetadata.resolvedCommit
     packageVersion   = $sourceMetadata.packageVersion
     architecture     = $Architecture
-    layout            = 'expanded-directory'
-    nodeVersion      = (& node --version)
-    npmVersion       = (& npm --version)
+    layout           = 'expanded-directory'
+    nodeVersion      = $nodeVersion
+    npmVersion       = $npmVersion
 } | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'payload-metadata.json') -Encoding utf8
 
 $files = @(Get-ChildItem -LiteralPath $applicationDirectory -File -Recurse)
