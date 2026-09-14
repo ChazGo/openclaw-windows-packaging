@@ -127,12 +127,18 @@ and ARM64 separately.
 - Do not add a packaging-side Node.js version pin or support-range policy.
   The selected upstream toolchain owns version selection; package composition
   supplies `NodeRuntimeArchiveFileName`, and the host reads the archive name.
+- Official releases combine the x64 and ARM64 packages into one signed
+  `.msixbundle` while retaining signed standalone packages for explicit
+  architecture-specific deployment. Compose the bundle before signing; bundle
+  signing recursively covers its contained packages.
 - Metadata files are part of the release trust chain, not incidental build
   output. Changes to their fields must be coordinated across payload creation,
   MSIX creation, signing validation, workflow artifacts, and tests.
 - Keep the workflow's manual `openclaw_ref` default and automatic
   `env.OPENCLAW_REF` fallback identical. Official-release changes also update
-  the reviewed immutable commit in `release-policy.json`.
+  the reviewed immutable commit and stable or correction tag in
+  `release-policy.json`. The tag determines the four-part MSIX identity
+  version and the permanent GitHub Release tag.
 - The launcher is NativeAOT. `dotnet build` and the xUnit suite exercise a JIT
   build, so run the NativeAOT publish path when changing reflection, interop,
   or trimming-sensitive code.

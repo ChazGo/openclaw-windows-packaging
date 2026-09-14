@@ -8,6 +8,13 @@ $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $policyPath = Join-Path $repositoryRoot 'release-policy.json'
 $policy = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json
 $approvedCommit = [string]$policy.approvedCommit
+$approvedPackageVersion = & (
+    Join-Path $PSScriptRoot 'Get-WorkflowPackageVersion.ps1'
+) `
+    -RunNumber 1 `
+    -RunAttempt 1 `
+    -ReleaseVersion ([string]$policy.packageVersion)
+$approvedPayloadVersion = [string]$policy.payloadPackageVersion
 $packagingCommit = '1111111111111111111111111111111111111111'
 $testRoot = Join-Path $env:TEMP (
     "openclaw-signing-policy-$([guid]::NewGuid().ToString('N'))"
@@ -23,6 +30,8 @@ function New-TestArtifact {
         [string]$Architecture,
 
         [string]$PayloadCommit = $approvedCommit,
+
+        [string]$PayloadPackageVersion = $approvedPayloadVersion,
 
         [bool]$SourceTreeDirty = $false,
 
@@ -112,7 +121,7 @@ function New-TestArtifact {
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
   <Identity Name="OpenClaw.Gateway"
             Publisher="$($policy.publisher)"
-            Version="0.1.1.0"
+            Version="$approvedPackageVersion"
             ProcessorArchitecture="$Architecture" />
 </Package>
 "@ | Set-Content `
@@ -174,6 +183,7 @@ function New-TestArtifact {
         payloadRepository = $policy.repository
         payloadRequestedRef = $PayloadCommit
         payloadResolvedCommit = $PayloadCommit
+        payloadPackageVersion = $PayloadPackageVersion
         payloadLayout = 'immutable-package'
         payloadFileCount = $payloadFiles.Count
         nodeRuntimeVersion = $nodeRuntimeVersion
@@ -183,7 +193,7 @@ function New-TestArtifact {
         archive = $msixName
         sha256 = $msixHash
         signed = $false
-        packageVersion = '0.1.1.0'
+        packageVersion = $approvedPackageVersion
         publisher = $policy.publisher
     } |
         ConvertTo-Json |
@@ -197,14 +207,86 @@ function Invoke-PolicyValidation {
         [Parameter(Mandatory)]
         [string]$Root,
 
-        [string]$RequestedRef = $approvedCommit
+        [string]$RequestedRef = $approvedCommit,
+
+        [switch]$PreserveBundle
     )
+
+    if (-not $PreserveBundle) {
+        New-TestBundle -Root $Root
+    }
 
     & (Join-Path $PSScriptRoot 'Test-SigningInputs.ps1') `
         -ArtifactsDirectory $Root `
         -PolicyPath $policyPath `
+        -BundlePath (Join-Path $Root 'bundle\OpenClawGateway.msixbundle') `
         -RequestedRef $RequestedRef `
         -PackagingCommit $packagingCommit
+}
+
+function New-TestBundle {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Root,
+
+        [string]$X64Package = (Join-Path `
+            $Root `
+            'x64\OpenClawGateway-x64.msix'),
+
+        [string]$BundleVersion = '2026.912.815.0'
+    )
+
+    $bundleDirectory = Join-Path $Root 'bundle'
+    $bundleStaging = Join-Path $Root '.bundle-package'
+    Remove-Item `
+        -LiteralPath $bundleDirectory, $bundleStaging `
+        -Recurse `
+        -Force `
+        -ErrorAction SilentlyContinue
+    $bundleMetadata = Join-Path $bundleStaging 'AppxMetadata'
+    New-Item `
+        -Path $bundleDirectory, $bundleMetadata `
+        -ItemType Directory `
+        -Force |
+        Out-Null
+
+    Copy-Item `
+        -LiteralPath $X64Package `
+        -Destination (Join-Path $bundleStaging 'OpenClawGateway-x64.msix')
+    Copy-Item `
+        -LiteralPath (Join-Path `
+            $Root `
+            'arm64\OpenClawGateway-arm64.msix') `
+        -Destination (Join-Path $bundleStaging 'OpenClawGateway-arm64.msix')
+
+    @"
+<?xml version="1.0" encoding="utf-8"?>
+<Bundle xmlns="http://schemas.microsoft.com/appx/2013/bundle">
+  <Identity Name="OpenClaw.Gateway"
+            Publisher="$($policy.publisher)"
+            Version="$BundleVersion" />
+  <Packages>
+    <Package Type="application"
+             Version="$approvedPackageVersion"
+             Architecture="x64"
+             FileName="OpenClawGateway-x64.msix" />
+    <Package Type="application"
+             Version="$approvedPackageVersion"
+             Architecture="arm64"
+             FileName="OpenClawGateway-arm64.msix" />
+  </Packages>
+</Bundle>
+"@ | Set-Content `
+        -LiteralPath (Join-Path `
+            $bundleMetadata `
+            'AppxBundleManifest.xml') `
+        -Encoding utf8
+
+    [IO.Compression.ZipFile]::CreateFromDirectory(
+        $bundleStaging,
+        (Join-Path $bundleDirectory 'OpenClawGateway.msixbundle')
+    )
+    Remove-Item -LiteralPath $bundleStaging -Recurse -Force
 }
 
 function Assert-Fails {
@@ -320,6 +402,19 @@ try {
     $x64Metadata |
         ConvertTo-Json |
         Set-Content -LiteralPath $x64MetadataPath -Encoding utf8
+    Assert-Fails `
+        -MessagePattern 'metadata is not eligible' `
+        -Action {
+            Invoke-PolicyValidation -Root $testRoot
+        }
+
+    Remove-Item -LiteralPath $testRoot -Recurse -Force
+    New-Item -Path $testRoot -ItemType Directory | Out-Null
+    New-TestArtifact `
+        -Root $testRoot `
+        -Architecture x64 `
+        -PayloadPackageVersion '2026.9.4'
+    New-TestArtifact -Root $testRoot -Architecture arm64
     Assert-Fails `
         -MessagePattern 'metadata is not eligible' `
         -Action {
@@ -501,6 +596,21 @@ try {
         -MessagePattern 'MSIX hash does not match' `
         -Action {
             Invoke-PolicyValidation -Root $testRoot
+        }
+
+    Reset-TestArtifacts
+    $substitutedX64 = Join-Path $testRoot 'substituted-x64.msix'
+    Copy-Item `
+        -LiteralPath (Join-Path `
+            $testRoot `
+            'x64\OpenClawGateway-x64.msix') `
+        -Destination $substitutedX64
+    Add-Content -LiteralPath $substitutedX64 -Value 'substituted'
+    New-TestBundle -Root $testRoot -X64Package $substitutedX64
+    Assert-Fails `
+        -MessagePattern 'does not match the authorized standalone package' `
+        -Action {
+            Invoke-PolicyValidation -Root $testRoot -PreserveBundle
         }
 
     Write-Host 'Gateway MSIX signing policy tests passed.'

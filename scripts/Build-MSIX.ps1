@@ -199,6 +199,7 @@ if (
     $payloadInfo.layout -ne 'expanded-directory' -or
     $payloadInfo.nodeVersion -isnot [string] -or
     $payloadInfo.nodeVersion -notmatch '^v?\d+\.\d+\.\d+$' -or
+    [string]::IsNullOrWhiteSpace([string]$payloadInfo.packageVersion) -or
     $payloadInfo.requestedRef -isnot [string] -or
     [string]::IsNullOrWhiteSpace($payloadInfo.requestedRef) -or
     $payloadInfo.resolvedCommit -notmatch '^[0-9a-fA-F]{40}$'
@@ -537,6 +538,7 @@ try {
         payloadRepository = $payloadInfo.repository
         payloadRequestedRef = $payloadInfo.requestedRef
         payloadResolvedCommit = $payloadInfo.resolvedCommit.ToLowerInvariant()
+        payloadPackageVersion = [string]$payloadInfo.packageVersion
         payloadLayout = 'immutable-package'
         payloadFileCount = $payloadFiles.Count
         nodeRuntimeVersion = $nodeVersion
