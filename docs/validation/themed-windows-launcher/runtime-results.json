@@ -99,7 +99,7 @@
       "id": "claw-dark",
       "family": "Claw",
       "importedCustomTheme": false,
-      "screenshot": "claw-dark.png",
+      "screenshot": "https://github.com/user-attachments/assets/a9335cd9-9d19-49ff-8333-860af1bddd9e",
       "hostTheme": "dark",
       "mode": "dark",
       "tokens": {
@@ -124,7 +124,7 @@
       "id": "claw-light",
       "family": "Claw",
       "importedCustomTheme": false,
-      "screenshot": "claw-light.png",
+      "screenshot": "https://github.com/user-attachments/assets/6ee317d9-827c-4156-a16c-4514843cb1ff",
       "hostTheme": "light",
       "mode": "light",
       "tokens": {
@@ -149,7 +149,7 @@
       "id": "custom-dark",
       "family": "Windows Launcher Proof",
       "importedCustomTheme": true,
-      "screenshot": "custom-dark.png",
+      "screenshot": "https://github.com/user-attachments/assets/64f9cd0e-db79-4748-b789-d78cbfe55711",
       "hostTheme": "custom",
       "mode": "dark",
       "tokens": {
@@ -174,7 +174,7 @@
       "id": "custom-light",
       "family": "Windows Launcher Proof",
       "importedCustomTheme": true,
-      "screenshot": "custom-light.png",
+      "screenshot": "https://github.com/user-attachments/assets/ad6f41c0-d045-4f80-bc14-544953d27825",
       "hostTheme": "custom-light",
       "mode": "light",
       "tokens": {

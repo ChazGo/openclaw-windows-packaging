@@ -5,9 +5,10 @@ This proof was generated from packaging implementation commit
 forwarding in `openclaw/openclaw` commit
 `f65ecca89667b8a55d9f88d76c487f0a0ab11da8`.
 
-The four screenshots cover the default Claw dark and light themes plus
-distinctive imported custom dark and light themes. Each run uses the same
-authenticated Gateway process and iframe. The result metadata verifies:
+The four screenshots hosted in the pull request cover the default Claw dark
+and light themes plus distinctive imported custom dark and light themes. Each
+run uses the same authenticated Gateway process and iframe. The result
+metadata links each hosted image and verifies:
 
 - `Windows Launcher` in the Control UI sidebar, tab, and page heading.
 - `Gateway Isolation` as the launcher status row.
