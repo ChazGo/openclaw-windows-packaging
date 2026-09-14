@@ -384,19 +384,23 @@ page.on("request", (request) => {
 });
 
 try {
-  await until(async () => {
-    if (child.exitCode !== null) {
-      throw new Error(`Gateway exited with ${child.exitCode}: ${logs}`);
-    }
-    try {
-      return (await fetch(`${base}/healthz`)).ok;
-    } catch (error) {
-      if (error.cause?.code !== "ECONNREFUSED") {
-        throw error;
+  try {
+    await until(async () => {
+      if (child.exitCode !== null) {
+        throw new Error(`Gateway exited with ${child.exitCode}: ${logs}`);
       }
-      return false;
-    }
-  }, "Gateway readiness");
+      try {
+        return (await fetch(`${base}/healthz`)).ok;
+      } catch (error) {
+        if (error.cause?.code !== "ECONNREFUSED") {
+          throw error;
+        }
+        return false;
+      }
+    }, "Gateway readiness");
+  } catch (error) {
+    throw new Error(`${error.message}\nGateway logs:\n${logs}`);
+  }
 
   let canonicalBody;
   const httpResults = [];

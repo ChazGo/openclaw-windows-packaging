@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "packagingCommit": "5ef558a28f182fd002478db89b8844c8ac4747fc",
+  "corePullRequest": "openclaw/openclaw#145409",
+  "coreCommit": "f65ecca89667b8a55d9f88d76c487f0a0ab11da8",
+  "build": {
+    "version": "2026.9.4",
+    "buildId": "2026.9.4-release-f65ecca89667-2026-09-14T22-27-01.258Z",
+    "controlUiBuildSource": "bundled"
+  },
+  "environment": {
+    "os": "Windows x64",
+    "node": "v24.18.0",
+    "browser": "153.0.4234.32",
+    "layout": "expanded application"
+  },
+  "sha256": {
+    "launcher": "2d59e8937074d252af3b0c3aa89814e59b132ef6a0e77ad4a38fb90c14b958be",
+    "node": "9a4eb5f1c29c6a2e93852ead46b999e284a6a5ca8bab4d4e241d587d025a52de",
+    "runtimeEntry": "538e8ee2b65a0b24bb8a5ed3421bfe66621b1e0b5f726a167758c004f566fb36",
+    "plugin": "1f3a0125bfa25216b203cdf760347286091da896246e74645606bab7092a8760"
+  },
+  "launcher": {
+    "inheritedIsolationInput": "enabled",
+    "reportedIsolationMode": "disabled",
+    "provesLauncherOverridesInheritedInput": true
+  },
+  "route": {
+    "path": "/plugins/gateway-isolation/status",
+    "httpResults": [
+      {
+        "method": "GET",
+        "access": "anonymous",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "access": "wrong-token",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "access": "authenticated",
+        "status": 200
+      },
+      {
+        "method": "HEAD",
+        "access": "anonymous",
+        "status": 401
+      },
+      {
+        "method": "HEAD",
+        "access": "wrong-token",
+        "status": 401
+      },
+      {
+        "method": "HEAD",
+        "access": "authenticated",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "access": "authenticated",
+        "status": 200,
+        "effect": "same read-only response"
+      },
+      {
+        "method": "PUT",
+        "access": "authenticated",
+        "status": 200,
+        "effect": "same read-only response"
+      },
+      {
+        "method": "PATCH",
+        "access": "authenticated",
+        "status": 200,
+        "effect": "same read-only response"
+      },
+      {
+        "method": "DELETE",
+        "access": "authenticated",
+        "status": 200,
+        "effect": "same read-only response"
+      }
+    ],
+    "authenticated": true,
+    "readOnly": true,
+    "responseHardening": true
+  },
+  "frame": {
+    "sandbox": "allow-scripts",
+    "allowSameOrigin": false,
+    "visibleRequests": 1,
+    "postMountNavigations": 0,
+    "sameFrameAcrossLiveThemeSwitches": true
+  },
+  "themes": [
+    {
+      "id": "claw-dark",
+      "family": "Claw",
+      "importedCustomTheme": false,
+      "screenshot": "claw-dark.png",
+      "hostTheme": "dark",
+      "mode": "dark",
+      "tokens": {
+        "--bg": "#0e1015",
+        "--card": "#161920",
+        "--button-bg": "#191c24",
+        "--text": "#bcbcc0",
+        "--text-strong": "#f4f4f5",
+        "--muted": "#8b8b94",
+        "--border": "#1e2028",
+        "--border-strong": "#2e3040",
+        "--focus": "#ff5c5c",
+        "--ok-text": "#22c55e",
+        "--warn-text": "#f59e0b",
+        "--radius": "10px",
+        "--radius-full": "9999px",
+        "--font-body": "\"Instrument Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+        "--font-mono": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, monospace"
+      }
+    },
+    {
+      "id": "claw-light",
+      "family": "Claw",
+      "importedCustomTheme": false,
+      "screenshot": "claw-light.png",
+      "hostTheme": "light",
+      "mode": "light",
+      "tokens": {
+        "--bg": "#faf9f7",
+        "--card": "#fff",
+        "--button-bg": "#fff",
+        "--text": "#403c35",
+        "--text-strong": "#211e1a",
+        "--muted": "#6e6960",
+        "--border": "#e8e4dc",
+        "--border-strong": "#d6d0c5",
+        "--focus": "#bd4531",
+        "--ok-text": "#166534",
+        "--warn-text": "#92400e",
+        "--radius": "10px",
+        "--radius-full": "9999px",
+        "--font-body": "\"Instrument Sans\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif",
+        "--font-mono": "\"JetBrains Mono\", ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Monaco, Consolas, monospace"
+      }
+    },
+    {
+      "id": "custom-dark",
+      "family": "Windows Launcher Proof",
+      "importedCustomTheme": true,
+      "screenshot": "custom-dark.png",
+      "hostTheme": "custom",
+      "mode": "dark",
+      "tokens": {
+        "--bg": "#151026",
+        "--card": "#281d45",
+        "--button-bg": "#3f2a63",
+        "--text": "#f8efff",
+        "--text-strong": "#ffffff",
+        "--muted": "#c5aad8",
+        "--border": "#7b5aa6",
+        "--border-strong": "#ad86d8",
+        "--focus": "#ff4fd8",
+        "--ok-text": "#22c55e",
+        "--warn-text": "#f59e0b",
+        "--radius": "10px",
+        "--radius-full": "9999px",
+        "--font-body": "Georgia, serif",
+        "--font-mono": "Courier New, monospace"
+      }
+    },
+    {
+      "id": "custom-light",
+      "family": "Windows Launcher Proof",
+      "importedCustomTheme": true,
+      "screenshot": "custom-light.png",
+      "hostTheme": "custom-light",
+      "mode": "light",
+      "tokens": {
+        "--bg": "#fff4d6",
+        "--card": "#ffe3a3",
+        "--button-bg": "#ffd166",
+        "--text": "#342400",
+        "--text-strong": "#1f1300",
+        "--muted": "#765b23",
+        "--border": "#b7791f",
+        "--border-strong": "#7c4f00",
+        "--focus": "#7b2cbf",
+        "--ok-text": "#166534",
+        "--warn-text": "#92400e",
+        "--radius": "10px",
+        "--radius-full": "9999px",
+        "--font-body": "Georgia, serif",
+        "--font-mono": "Courier New, monospace"
+      }
+    }
+  ],
+  "cliControlPresent": true,
+  "passed": true
+}
