@@ -7,6 +7,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# A release is safe to package only when the Gateway and its same-origin
+# dashboard were emitted by the same OpenClaw build lifecycle.
 $distDirectory = Join-Path $OpenClawDirectory 'dist'
 $buildInfoPath = Join-Path $distDirectory 'build-info.json'
 $controlUiDirectory = Join-Path $distDirectory 'control-ui'
@@ -30,6 +32,8 @@ if ([string]::IsNullOrWhiteSpace($gatewayBuildId)) {
     throw "Gateway build identity is missing from '$buildInfoPath'."
 }
 
+# Vite writes the dashboard identity into the service worker so stale browser
+# assets can retire themselves when a new Gateway build is installed.
 $serviceWorker = Get-Content -LiteralPath $serviceWorkerPath -Raw
 $serviceWorkerMatch = [regex]::Match(
     $serviceWorker,
@@ -55,6 +59,8 @@ if (-not [string]::Equals(
     )
 }
 
+# The browser sends its embedded identity during the Gateway handshake. Check
+# the JavaScript payload as well as the service worker before packing the app.
 $clientBundleContainsBuildId = @(
     Get-ChildItem -LiteralPath $assetsDirectory -Filter '*.js' -File -Recurse |
         Where-Object {

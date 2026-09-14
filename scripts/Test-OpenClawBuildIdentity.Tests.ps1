@@ -80,12 +80,16 @@ function Assert-Fails {
 }
 
 try {
+    # A single OpenClaw build must emit one identity across all runtime and UI
+    # artifacts consumed by the packaged dashboard handshake.
     $matching = New-BuildFixture `
         -Name 'matching' `
         -GatewayBuildId 'release-build-a' `
         -ControlUiBuildId 'release-build-a'
     & $scriptPath -OpenClawDirectory $matching
 
+    # Missing UI identity is unsafe because packaging could not prove which
+    # dashboard build will connect to the Gateway.
     $missing = New-BuildFixture `
         -Name 'missing' `
         -GatewayBuildId 'release-build-a' `
@@ -94,6 +98,8 @@ try {
         & $scriptPath -OpenClawDirectory $missing
     }
 
+    # A separately rebuilt dashboard must fail even when both artifacts are
+    # otherwise complete, reproducing the release-only regression.
     $mismatched = New-BuildFixture `
         -Name 'mismatched' `
         -GatewayBuildId 'release-build-a' `
