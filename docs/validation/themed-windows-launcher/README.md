@@ -1,7 +1,7 @@
 # Themed Windows Launcher validation
 
 This proof was generated from packaging implementation commit
-`5ef558a28f182fd002478db89b8844c8ac4747fc` against the merged generic theme
+`1d4489591af611cb31a782600610e22173028842` against the merged generic theme
 forwarding in `openclaw/openclaw` commit
 `f65ecca89667b8a55d9f88d76c487f0a0ab11da8`.
 
