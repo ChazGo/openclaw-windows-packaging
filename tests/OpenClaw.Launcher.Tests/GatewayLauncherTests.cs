@@ -97,17 +97,17 @@ public sealed class GatewayLauncherTests : IDisposable
     }
 
     [Theory]
-    [InlineData(GatewayIsolationMode.Disabled, "disabled")]
-    [InlineData(GatewayIsolationMode.Enabled, "enabled")]
+    [InlineData((int)GatewayIsolationMode.Disabled, "disabled")]
+    [InlineData((int)GatewayIsolationMode.Enabled, "enabled")]
     public void CreateStartInfoReportsExactGatewayIsolationMode(
-        GatewayIsolationMode mode,
+        int mode,
         string expected)
     {
         var startInfo = GatewayLauncher.CreateStartInfo(
             "node",
             _payloadDirectory,
             [],
-            gatewayIsolationMode: mode);
+            gatewayIsolationMode: (GatewayIsolationMode)mode);
 
         Assert.Equal(
             expected,

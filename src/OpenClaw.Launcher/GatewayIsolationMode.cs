@@ -1,6 +1,6 @@
 namespace OpenClaw.Launcher;
 
-public enum GatewayIsolationMode
+internal enum GatewayIsolationMode
 {
     Disabled,
     Enabled
