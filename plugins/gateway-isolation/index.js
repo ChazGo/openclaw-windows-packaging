@@ -64,6 +64,7 @@ export function renderGatewayIsolationPage(mode) {
 
   const enabled = mode === "enabled";
   const status = enabled ? "Enabled" : "Disabled";
+  const command = `clawctl gateway-isolation ${enabled ? "disable" : "enable"}`;
   const tone = enabled ? "ok" : "warn";
 
   return `<!doctype html>
@@ -147,7 +148,14 @@ export function renderGatewayIsolationPage(mode) {
       align-items: center;
       padding: 18px;
     }
+    .settings-row + .settings-row { border-top: 1px solid var(--border); }
+    .settings-row--stacked { align-items: start; }
     .settings-row__title { color: var(--text-strong); font-weight: 600; }
+    .settings-row__description {
+      margin-top: 5px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
     .settings-row__control { justify-self: end; min-width: 0; }
     .status {
       display: inline-flex;
@@ -166,6 +174,38 @@ export function renderGatewayIsolationPage(mode) {
     }
     .status--ok { color: var(--ok-text); background: var(--ok-bg); }
     .status--warn { color: var(--warn-text); background: var(--warn-bg); }
+    .command {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 9px;
+      background: var(--bg);
+    }
+    code {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+    button {
+      flex: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 5px 9px;
+      background: var(--button-bg);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+    }
+    .copy-status {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
     @media (max-width: 620px) {
       main { padding: 16px; }
       .settings-row { grid-template-columns: 1fr; gap: 12px; }
@@ -185,9 +225,50 @@ export function renderGatewayIsolationPage(mode) {
           <span class="status status--${tone}">${status}</span>
         </div>
       </div>
+      <div class="settings-row settings-row--stacked">
+        <div>
+          <div class="settings-row__title">Change with CLI</div>
+          <div class="settings-row__description">Run from the signed-in user session on the Gateway host.</div>
+        </div>
+        <div class="settings-row__control command">
+          <code id="isolation-command">${command}</code>
+          <button id="copy-command" type="button" aria-label="Copy command">Copy</button>
+        </div>
+        <div id="copy-status" class="copy-status" role="status" aria-live="polite"></div>
+      </div>
     </section>
   </main>
   ${THEME_BRIDGE_SCRIPT}
+  <script>
+    const button = document.getElementById("copy-command");
+    const command = document.getElementById("isolation-command");
+    const status = document.getElementById("copy-status");
+    button.addEventListener("click", async () => {
+      const value = command.textContent;
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(value);
+        copied = true;
+      } catch {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(command);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        copied = document.execCommand("copy");
+        if (copied) {
+          selection.removeAllRanges();
+        }
+      }
+      if (copied) {
+        button.textContent = "Copied";
+        status.textContent = "";
+      } else {
+        button.textContent = "Selected";
+        status.textContent = "Copy the selected command manually.";
+      }
+    });
+  </script>
 </body>
 </html>`;
 }
