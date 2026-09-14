@@ -89,6 +89,11 @@ jobs:
         run: >
           .\scripts\Test-WorkflowSigningConfiguration.ps1
 
+      - name: Test build workflow configuration
+        shell: pwsh
+        run: >
+          .\scripts\Test-WorkflowBuildConfiguration.ps1
+
       - name: Test workflow package version
         shell: pwsh
         run: >
@@ -138,9 +143,7 @@ jobs:
         working-directory: openclaw-source
         env:
           OPENCLAW_CONTROL_UI_RELEASE_BUILD: "1"
-        run: |
-          pnpm build
-          pnpm ui:build
+        run: pnpm build
 
       - name: Pack npm package
         id: source
