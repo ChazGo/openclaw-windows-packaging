@@ -128,7 +128,7 @@ Changing only the workflow-dispatch default does not change automatic builds.
 For a one-time override, run **Build OpenClaw Gateway MSIX** manually and
 provide a tag, branch, or preferably a full 40-character commit SHA in
 `openclaw_ref`. Payload composition validates that the selected OpenClaw
-runtime can discover and load the packaging-owned Gateway Isolation plugin
+runtime can discover and load the packaging-owned Windows Launcher plugin
 with its required read-only route shape; incompatible older refs fail instead
 of producing a package without status UI.
 
@@ -167,15 +167,27 @@ dotnet test .\OpenClaw.Gateway.MSIX.slnx `
 
 `scripts\Build-Payload.ps1` npm-installs an OpenClaw package into an expanded,
 architecture-specific application tree and provisions the packaging-owned,
-enabled-by-default Gateway Isolation plugin into OpenClaw's bundled plugin
-directory. The plugin adds a read-only **Gateway Isolation** tab to the Control
-group and serves it through an authenticated, sandboxed plugin route. It reads
-only the launch-time `CLAWCTL_GATEWAY_ISOLATION` value and registers no mutation
-RPC or process control. `scripts\Build-MSIX.ps1` downloads the official Node.js
-archive matching the payload's recorded build version and architecture, copies
-both inputs into package content, rejects Node.js inside the application
-payload, creates a per-file inventory, and then creates an unsigned NativeAOT
-MSIX.
+enabled-by-default Windows Launcher plugin into OpenClaw's bundled plugin
+directory. Its internal package, path, and plugin ID remain
+`gateway-isolation`. The plugin adds a read-only **Windows Launcher** tab to the
+Control group and serves it through an authenticated, sandboxed plugin route.
+It reads only the launch-time `CLAWCTL_GATEWAY_ISOLATION` value and registers no
+mutation RPC or process control.
+
+Full selected-theme cohesion requires the generic plugin-frame theme forwarding
+merged by
+[`openclaw/openclaw#145409`](https://github.com/openclaw/openclaw/pull/145409).
+The minimum selected OpenClaw revision is its merged commit
+`f65ecca89667b8a55d9f88d76c487f0a0ab11da8`. The page consumes validated
+`openclaw:widget-theme` messages from its parent frame and follows built-in and
+custom light/dark themes without reloading. Direct opens and older compatible
+hosts still use the browser or operating system light/dark preference with a
+safe built-in palette.
+
+`scripts\Build-MSIX.ps1` downloads the official Node.js archive matching the
+payload's recorded build version and architecture, copies both inputs into
+package content, rejects Node.js inside the application payload, creates a
+per-file inventory, and then creates an unsigned NativeAOT MSIX.
 `scripts\Build-LocalMSIX.ps1` can reuse a successful workflow payload or a
 local payload directory. `-NodeArchivePath` can supply an already-downloaded
 archive, but its version and architecture must match the payload metadata.

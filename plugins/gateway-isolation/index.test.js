@@ -100,13 +100,11 @@ for (const expected of [
   {
     mode: "enabled",
     status: "Enabled",
-    command: "clawctl gateway-isolation disable",
     tone: "status--ok",
   },
   {
     mode: "disabled",
     status: "Disabled",
-    command: "clawctl gateway-isolation enable",
     tone: "status--warn",
   },
 ]) {
@@ -115,14 +113,9 @@ for (const expected of [
     assert.match(html, /Windows Launcher/);
     assert.match(html, /Reported Gateway Isolation/);
     assert.match(html, new RegExp(`>${expected.status}<`));
-    assert.match(html, /Change with CLI/);
-    assert.match(html, /Run from the signed-in user session on the Gateway host\./);
-    assert.match(html, new RegExp(expected.command));
     assert.match(html, new RegExp(expected.tone));
-    assert.match(html, /aria-label="Copy command"/);
-    assert.match(html, /Copy the selected command manually\./);
-    assert.match(html, /copied = document\.execCommand\("copy"\)/);
     assert.match(html, /openclaw:widget-theme/);
+    assert.doesNotMatch(html, /Change with CLI|clipboard|copy-command|clawctl gateway-isolation/);
     assert.doesNotMatch(html, /next manual Gateway restart/i);
   });
 }
@@ -189,6 +182,10 @@ test("ignores theme messages from other frames and malformed host values", () =>
       source: bridge.parent,
       data: { type: "openclaw:widget-theme", mode: "light", tokens: null },
     },
+    {
+      source: bridge.parent,
+      data: { type: "openclaw:widget-theme", mode: "light", tokens: [] },
+    },
   ]) {
     bridge.listener(event);
   }
@@ -253,12 +250,15 @@ for (const initial of ["enabled", "disabled", undefined, "", "invalid", "ENABLED
 
 for (const mode of [undefined, "", "invalid", "ENABLED", " enabled "]) {
   const label = JSON.stringify(mode) ?? "missing";
-  test(`fails closed for ${label} with no status, command, or copy control`, () => {
+    test(`fails closed for ${label} with no status or mutation guidance`, () => {
     const { routes } = registerPlugin(mode);
     const response = invokeRoute(routes[0]);
     assert.equal(response.statusCode, 503);
     assert.match(response.body, /did not provide a valid Gateway isolation mode/);
-    assert.doesNotMatch(response.body, /status--(?:ok|warn)|isolation-command|<button/);
+    assert.doesNotMatch(
+      response.body,
+      /status--(?:ok|warn)|<button|Change with CLI|clawctl gateway-isolation/,
+    );
     const bridge = runThemeBridge(response.body);
     bridge.listener({
       source: bridge.parent,

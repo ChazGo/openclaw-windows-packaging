@@ -2,7 +2,8 @@
 param(
     [string]$TestRoot,
     [string]$EvidenceDirectory,
-    [string]$ProductionSourceCommit = '9aa1df286c2b6fd59b4c101201ddae0ae6000324'
+    [Parameter(Mandatory)]
+    [string]$ProductionSourceCommit
 )
 
 # Do not enable strict mode: Build-Payload.ps1 must exercise its own missing-field semantics.
@@ -12,7 +13,9 @@ if (-not $TestRoot) {
     $TestRoot = Join-Path $repositoryRoot '.validation-payload-matrix'
 }
 if (-not $EvidenceDirectory) {
-    $EvidenceDirectory = Join-Path $repositoryRoot 'docs\validation\pr-28'
+    $EvidenceDirectory = Join-Path `
+        $repositoryRoot `
+        'docs\validation\themed-windows-launcher'
 }
 $TestRoot = [IO.Path]::GetFullPath($TestRoot)
 $EvidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory)
@@ -358,20 +361,24 @@ $evidence = [ordered]@{
     harness = 'scripts/validation/Test-GatewayIsolationPayloadMatrix.ps1'
     harnessSha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash.ToLowerInvariant()
     environment = [ordered]@{ powershell = $PSVersionTable.PSVersion.ToString(); node = $nodeVersion; npm = $npmVersion; host = 'Windows x64'; npmOffline = $true }
-    command = 'pwsh -NoProfile -File .\scripts\validation\Test-GatewayIsolationPayloadMatrix.ps1'
+    command = 'pwsh -NoProfile -File .\scripts\validation\Test-GatewayIsolationPayloadMatrix.ps1 -ProductionSourceCommit <implementation-commit>'
     summary = [ordered]@{ total = $results.Count; passed = $results.Count; failed = 0; accepted = $acceptedCount; rejected = $results.Count - $acceptedCount; architectures = @('x64', 'arm64') }
+    verifiedContracts = @(
+        'Exact three-file plugin content and hashes for accepted x64 and ARM64 payloads.'
+        'Runtime inspection requires one read-only route and no methods, tools, services, or diagnostics.'
+        'Missing, conflicting, failed, incomplete, and capability-expanded plugin shapes are rejected.'
+        'Build environment and working directory are restored for accepted and rejected cases.'
+        'Rejected cases do not publish application content or payload metadata.'
+    )
     harnessEnvironmentRestored = $true
     harnessWorkingDirectoryRestored = $true
     generatedFixtureDirectoryRemoved = $true
-    cases = @($results.ToArray())
 }
 $json = $evidence | ConvertTo-Json -Depth 20
-$text = $transcript -join [Environment]::NewLine
-foreach ($publicOutput in @($json, $text)) {
+foreach ($publicOutput in @($json)) {
     Assert-Matrix ($publicOutput -notmatch '(?i)[a-z]:[\\/]') 'Evidence contains an absolute local path.'
     Assert-Matrix (-not $publicOutput.Contains($env:USERNAME)) 'Evidence contains the local username.'
 }
 New-Item -Path $EvidenceDirectory -ItemType Directory -Force | Out-Null
 $json | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'payload-matrix.json') -Encoding utf8
-$text | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'payload-matrix.txt') -Encoding utf8
-Write-Host "Payload matrix passed: $($results.Count) cases. Sanitized JSON and transcript written."
+Write-Host "Payload matrix passed: $($results.Count) cases. Sanitized summary written."
