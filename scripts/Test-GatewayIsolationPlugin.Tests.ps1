@@ -113,6 +113,7 @@ console.log(JSON.stringify(inspection));
         requestedRef = '0965053fe6b9341776df147a6934b7485c60b5ca'
         resolvedCommit = '0965053fe6b9341776df147a6934b7485c60b5ca'
         packageVersion = '2026.8.2'
+        nodeVersion = (& node -p 'process.versions.node' | Out-String).Trim()
     } |
         ConvertTo-Json |
         Set-Content `
