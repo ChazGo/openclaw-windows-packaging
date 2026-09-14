@@ -588,7 +588,7 @@ try {
   assert.doesNotMatch(json, /[A-Za-z]:[\\/]/);
   assert.equal(json.includes(os.userInfo().username), false);
   fs.writeFileSync(path.join(output, "runtime-results.json"), json);
-  fs.rmSync(temp, { recursive: true });
+  fs.rmSync(temp, { recursive: true, maxRetries: 10, retryDelay: 200 });
   console.log(
     `Windows Launcher runtime proof passed: ${themes.length} themes, one frame request, no reloads.`,
   );

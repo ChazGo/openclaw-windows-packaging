@@ -50,8 +50,7 @@ interactive-session launch path reports `disabled`; the future isolated-session
 launch path will select `enabled` when that session switch is implemented.
 These values declare external lifecycle ownership, prevent doctor-owned service
 repair, disable configured background auto-updates, and expose diagnostic
-isolation status without claiming independent attestation. The pinned OpenClaw
-`v2026.8.2` release honors external supervisor mode by refusing native service
+isolation status without claiming independent attestation. The selected OpenClaw runtime honors external supervisor mode by refusing native service
 mutation and OpenClaw self-update with guidance to use the external supervisor's
 workflow. This behavior belongs to upstream OpenClaw; the launcher does not
 reserve, reject, or rewrite upstream command arguments.
