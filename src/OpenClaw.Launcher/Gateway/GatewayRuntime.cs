@@ -127,10 +127,7 @@ internal sealed partial class GatewayRuntime
             string applicationDirectory = options.PackagedApplicationDirectory
                 ?? throw new SessionException(
                     "The packaged OpenClaw application was not found, so the gateway cannot be started.");
-            SessionRecord sessionRecord = session.RequireSetup();
-            GatewayLaunchConfiguration launch = ResolveLaunchConfiguration(
-                configuration,
-                sessionRecord,
+            GatewayLaunchConfiguration launch = configuration.Resolve(
                 Environment.GetEnvironmentVariable);
             string archivePath = options.PackagedNodeArchivePath
                 ?? throw new SessionException(
@@ -172,6 +169,7 @@ internal sealed partial class GatewayRuntime
         string workspacePath = sessionRecord.WorkspacePath
             ?? throw new SessionException(
                 "The isolated session has no shared workspace for the gateway.");
-        return configuration.Resolve(workspacePath, environmentVariable);
+        GatewayLaunchConfiguration resolved = configuration.Resolve(environmentVariable);
+        return resolved with { WorkingDirectory = resolved.WorkingDirectory ?? workspacePath };
     }
 }

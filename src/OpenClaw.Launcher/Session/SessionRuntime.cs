@@ -28,6 +28,7 @@ internal sealed class SessionRuntime
         IMxcSessionClient backend,
         string helperPath,
         string applicationId,
+        HostPaths paths,
         SetupStateStore setupState,
         GatewayStateStore gatewayState,
         string lifecycleLockScope)
@@ -37,6 +38,7 @@ internal sealed class SessionRuntime
         Backend = backend;
         HelperPath = helperPath;
         ApplicationId = applicationId;
+        Paths = paths;
         SetupState = setupState;
         GatewayState = gatewayState;
         LifecycleLock = new NamedSessionLock(lifecycleLockScope);
@@ -55,6 +57,8 @@ internal sealed class SessionRuntime
     public string HelperPath { get; }
 
     public string ApplicationId { get; }
+
+    public HostPaths Paths { get; }
 
     public SetupStateStore SetupState { get; }
 
@@ -138,6 +142,7 @@ internal sealed class SessionRuntime
             client,
             ResolveHelperPath(baseDirectory),
             applicationId,
+            paths,
             new SetupStateStore(paths.SetupStatePath),
             new GatewayStateStore(paths.GatewayStatePath),
             paths.SessionStatePath + "_Installation");
