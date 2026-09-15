@@ -128,9 +128,11 @@ For a one-time override, run **Build OpenClaw Gateway MSIX** manually and
 provide a tag, branch, or preferably a full 40-character commit SHA in
 `openclaw_ref`. Payload composition validates that the selected OpenClaw
 runtime discovers the packaging-owned Windows Launcher plugin in its
-default-disabled state, then uses OpenClaw's non-activating runtime inspection
-pass to validate its required read-only route shape. Incompatible older refs
-fail instead of producing a package with an unvalidated plugin.
+default-disabled state, then explicitly enables only that plugin in an isolated
+temporary validation profile before using OpenClaw's runtime inspection pass to
+validate its required read-only route shape. The temporary profile is removed
+after inspection and does not modify user configuration. Incompatible older
+refs fail instead of producing a package with an unvalidated plugin.
 
 The source build uses that revision's `.github/actions/setup-node-env` action
 to select Node.js and pnpm. Its resolved Node.js version is recorded in

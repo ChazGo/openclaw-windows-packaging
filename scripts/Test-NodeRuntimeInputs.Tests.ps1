@@ -38,18 +38,49 @@ try {
     '{"name":"openclaw","version":"0.0.0","type":"module"}' |
         Set-Content -LiteralPath "$source\package.json"
     @'
-const runtime = process.argv.includes("--runtime");
+const fs = await import("node:fs");
+const path = await import("node:path");
+const args = process.argv.slice(2);
+const configPath =
+  process.env.OPENCLAW_CONFIG_PATH ??
+  (process.env.OPENCLAW_STATE_DIR
+    ? path.join(process.env.OPENCLAW_STATE_DIR, "openclaw.json")
+    : undefined);
+if (args[0] === "plugins" && args[1] === "enable") {
+  if (!configPath) {
+    throw new Error("Missing isolated validation configuration path.");
+  }
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      plugins: {
+        entries: {
+          "gateway-isolation": {
+            enabled: true
+          }
+        }
+      }
+    }),
+  );
+  process.exit(0);
+}
+
+const enabled = Boolean(configPath) && fs.existsSync(configPath) &&
+  JSON.parse(fs.readFileSync(configPath, "utf8"))
+    .plugins?.entries?.["gateway-isolation"]?.enabled === true;
+const runtime = args.includes("--runtime");
 console.log(JSON.stringify({
   plugin: {
     id: "gateway-isolation",
     origin: "bundled",
-    enabled: false,
-    activated: runtime,
-    status: runtime ? "loaded" : "disabled",
-    imported: runtime,
-    httpRoutes: runtime ? 1 : 0
+    enabled,
+    activated: enabled && runtime,
+    status: enabled && runtime ? "loaded" : "disabled",
+    imported: enabled && runtime,
+    httpRoutes: enabled && runtime ? 1 : 0
   },
-  httpRouteCount: runtime ? 1 : 0,
+  httpRouteCount: enabled && runtime ? 1 : 0,
   gatewayMethods: [],
   tools: [],
   services: [],
