@@ -202,7 +202,7 @@ internal sealed class SessionExecutor
 
             _log("Collecting agent-side diagnostics from the isolated session.");
 
-            int executorExitCode = await _backend.ExecuteAttachedAsync(
+            MxcExecutionResult execution = await _backend.ExecuteAsync(
                 record.ToSandboxIdOrThrow(),
                 new MxcExecutionRequest(
                     BuildGuestCommandLine(helperPath, requestPath, "--collect")),
@@ -220,7 +220,7 @@ internal sealed class SessionExecutor
             {
                 throw new SessionException(
                     "The isolated session did not report a collection result " +
-                    $"(executor exit code {executorExitCode}).");
+                    DescribeMissingResult(execution));
             }
 
             SessionCollectResult result = SessionCollectProtocol.ReadResult(resultText);
