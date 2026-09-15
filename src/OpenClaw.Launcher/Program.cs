@@ -318,6 +318,7 @@ internal static class Program
                         runtime.AcquireLifecycleLock();
                     await runtime.Coordinator.RemoveAsync(cancellationToken)
                         .ConfigureAwait(false);
+                    runtime.GatewayState.Clear();
                     await output.WriteLineAsync("OpenClaw isolated session was removed.")
                         .ConfigureAwait(false);
                     return 0;
@@ -327,7 +328,38 @@ internal static class Program
                     GetSessionRuntime(),
                     output,
                     resolveNode,
-                    cancellationToken)
+                    cancellationToken),
+                GatewayStart = async cancellationToken =>
+                {
+                    Gateway.GatewayStartResult result = await Gateway.GatewayRuntime
+                        .Create(options, log, resolveNode)
+                        .Controller
+                        .StartAsync(GetSessionRuntime().HelperPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    await output.WriteLineAsync(result.Message).ConfigureAwait(false);
+                    return result.State == Gateway.GatewayState.Running ? 0 : 1;
+                },
+                GatewayStatus = async cancellationToken =>
+                {
+                    Gateway.GatewayStatusReport result = await Gateway.GatewayRuntime
+                        .Create(options, log, resolveNode)
+                        .Controller
+                        .GetStatusAsync(GetSessionRuntime().HelperPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    await output.WriteLineAsync(result.Message).ConfigureAwait(false);
+                    return result.State is Gateway.GatewayState.Running or Gateway.GatewayState.NotStarted
+                        ? 0 : 1;
+                },
+                GatewayStop = async cancellationToken =>
+                {
+                    Gateway.GatewayStopResult result = await Gateway.GatewayRuntime
+                        .Create(options, log, resolveNode)
+                        .Controller
+                        .StopAsync(GetSessionRuntime().HelperPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    await output.WriteLineAsync(result.Message).ConfigureAwait(false);
+                    return result.Succeeded ? 0 : 1;
+                }
             });
 
         InvocationConfiguration configuration = new()
