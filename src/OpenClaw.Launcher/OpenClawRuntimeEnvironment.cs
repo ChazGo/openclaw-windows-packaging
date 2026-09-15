@@ -1,3 +1,5 @@
+using OpenClaw.Launcher.Gateway;
+
 namespace OpenClaw.Launcher;
 
 /// <summary>
@@ -14,6 +16,7 @@ internal static class OpenClawRuntimeEnvironment
     public const string SupervisorModeVariable = "OPENCLAW_SUPERVISOR_MODE";
     public const string ServiceRepairPolicyVariable = "OPENCLAW_SERVICE_REPAIR_POLICY";
     public const string NoAutoUpdateVariable = "OPENCLAW_NO_AUTO_UPDATE";
+    public const string GatewayIsolationVariable = "OPENCLAW_GATEWAY_ISOLATION";
 
     public const string ExternalValue = "external";
     public const string NoAutoUpdateValue = "1";
@@ -31,20 +34,29 @@ internal static class OpenClawRuntimeEnvironment
     /// The variables to apply, as an ordinary dictionary.
     /// </summary>
     public static IReadOnlyDictionary<string, string> Build() =>
+        Build(GatewayIsolationMode.Enabled);
+
+    public static IReadOnlyDictionary<string, string> Build(
+        GatewayIsolationMode gatewayIsolationMode) =>
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             [SupervisorModeVariable] = ExternalValue,
             [ServiceRepairPolicyVariable] = ExternalValue,
             [NoAutoUpdateVariable] = NoAutoUpdateValue,
+            [GatewayIsolationVariable] =
+                GatewayIsolationPolicy.EnvironmentValue(gatewayIsolationMode),
         };
 
     public static IReadOnlyDictionary<string, string> Build(
         bool isInteractive,
-        Func<string, string?> readEnvironmentVariable)
+        Func<string, string?> readEnvironmentVariable,
+        GatewayIsolationMode gatewayIsolationMode = GatewayIsolationMode.Enabled)
     {
         ArgumentNullException.ThrowIfNull(readEnvironmentVariable);
 
-        Dictionary<string, string> result = new(Build(), StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> result = new(
+            Build(gatewayIsolationMode),
+            StringComparer.OrdinalIgnoreCase);
         string? forceColor = readEnvironmentVariable(ForceColorVariable);
         string? wtSession = readEnvironmentVariable(WindowsTerminalSessionVariable);
         string? noColor = readEnvironmentVariable(NoColorVariable);
@@ -94,11 +106,16 @@ internal static class OpenClawRuntimeEnvironment
     /// <summary>
     /// Applies the variables to a process environment.
     /// </summary>
-    public static void ApplyTo(IDictionary<string, string?> environment)
+    public static void ApplyTo(IDictionary<string, string?> environment) =>
+        ApplyTo(environment, GatewayIsolationMode.Enabled);
+
+    public static void ApplyTo(
+        IDictionary<string, string?> environment,
+        GatewayIsolationMode gatewayIsolationMode)
     {
         ArgumentNullException.ThrowIfNull(environment);
 
-        foreach ((string name, string value) in Build())
+        foreach ((string name, string value) in Build(gatewayIsolationMode))
         {
             environment[name] = value;
         }

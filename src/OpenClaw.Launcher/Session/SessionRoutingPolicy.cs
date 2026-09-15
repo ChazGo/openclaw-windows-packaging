@@ -1,4 +1,5 @@
 using OpenClaw.Launcher.Mxc;
+using OpenClaw.Launcher.Gateway;
 
 namespace OpenClaw.Launcher.Session;
 
@@ -75,35 +76,35 @@ internal static class SessionRoutingPolicy
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A machine that cannot host sessions runs directly, exactly as it did
-    /// before this feature existed. That is a capability of the machine, not a
-    /// failure to hide.
+    /// A disabled selection runs directly without probing. An enabled
+    /// selection is required and never degrades to direct execution.
     /// </para>
     /// <para>
-    /// There is deliberately no fallback once a session is chosen. A backend
+    /// There is deliberately no fallback once isolation is enabled. A backend
     /// that breaks on a supported machine must surface, not quietly relocate
     /// the user's work onto the host with a different profile and different
     /// isolation.
     /// </para>
     /// </remarks>
     public static SessionRoutingDecision Decide(
-        SessionMode mode,
+        GatewayIsolationSelection selection,
         string? packageFamilyName,
         MxcReadinessReport readiness)
     {
+        ArgumentNullException.ThrowIfNull(selection);
         ArgumentNullException.ThrowIfNull(readiness);
 
-        if (mode == SessionMode.Disabled)
+        if (selection.Mode == GatewayIsolationMode.Disabled)
         {
             return new SessionRoutingDecision(
                 SessionRouting.Direct,
-                $"{ModeVariable} is set to 0.");
+                selection.Reason);
         }
 
         if (packageFamilyName is null)
         {
             return Unavailable(
-                mode,
+                selection,
                 "OpenClaw is not running from its installed package, so it has " +
                 "no identity to provision an isolated session with.");
         }
@@ -111,7 +112,7 @@ internal static class SessionRoutingPolicy
         if (!readiness.RuntimeAvailable)
         {
             return Unavailable(
-                mode,
+                selection,
                 "The isolated-session runtime is unavailable: " +
                 (readiness.RuntimeUnavailableReason ?? "no reason was reported."));
         }
@@ -119,7 +120,7 @@ internal static class SessionRoutingPolicy
         if (readiness.BackendProbe is { IsolationSessionAvailable: false })
         {
             return Unavailable(
-                mode,
+                selection,
                 "This machine's isolated-session backend reported that it is " +
                 "not available.");
         }
@@ -131,7 +132,7 @@ internal static class SessionRoutingPolicy
                 ? "This Windows build does not support isolated agent sessions."
                 : "Isolated-session support could not be determined on this machine.";
             return Unavailable(
-                mode,
+                selection,
                 readiness.BackendProbeFailureReason is null
                     ? detail
                     : $"{detail} The backend probe failed: " +
@@ -140,13 +141,13 @@ internal static class SessionRoutingPolicy
 
         return new SessionRoutingDecision(
             SessionRouting.Session,
-            "The isolated-session backend is available.");
+            $"{selection.Reason} The isolated-session backend is available.");
     }
 
-    private static SessionRoutingDecision Unavailable(SessionMode mode, string reason) =>
-        mode == SessionMode.Required
-            ? throw new SessionException(
-                $"{ModeVariable} requires an isolated session, but one cannot " +
-                $"be used. {reason}")
-            : new SessionRoutingDecision(SessionRouting.Direct, reason);
+    private static SessionRoutingDecision Unavailable(
+        GatewayIsolationSelection selection,
+        string reason) =>
+        throw new SessionException(
+            $"{selection.Reason} An isolated session is required, but one cannot " +
+            $"be used. {reason}");
 }

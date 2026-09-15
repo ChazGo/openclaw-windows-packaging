@@ -1,3 +1,4 @@
+using OpenClaw.Launcher.Gateway;
 using OpenClaw.Launcher.Mxc;
 using OpenClaw.Launcher.Session;
 
@@ -29,11 +30,17 @@ public sealed class SessionRoutingPolicyTests
     private static Func<string, string?> Environment(string? value) =>
         name => name == SessionRoutingPolicy.ModeVariable ? value : null;
 
+    private static GatewayIsolationSelection Enabled() =>
+        new(GatewayIsolationMode.Enabled, "Gateway isolation is enabled.");
+
+    private static GatewayIsolationSelection Disabled() =>
+        new(GatewayIsolationMode.Disabled, "Gateway isolation is disabled.");
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void UnsetModeIsAutomatic(string? value)
+    public void UnsetDevelopmentModeIsAutomatic(string? value)
     {
         Assert.Equal(
             SessionMode.Automatic,
@@ -46,7 +53,7 @@ public sealed class SessionRoutingPolicyTests
     [InlineData("FALSE")]
     [InlineData("off")]
     [InlineData("no")]
-    public void FalsyValuesDisableSessions(string value)
+    public void FalsyDevelopmentValuesDisableSessions(string value)
     {
         Assert.Equal(
             SessionMode.Disabled,
@@ -58,7 +65,7 @@ public sealed class SessionRoutingPolicyTests
     [InlineData("true")]
     [InlineData("On")]
     [InlineData("yes")]
-    public void TruthyValuesRequireSessions(string value)
+    public void TruthyDevelopmentValuesRequireSessions(string value)
     {
         Assert.Equal(
             SessionMode.Required,
@@ -66,9 +73,8 @@ public sealed class SessionRoutingPolicyTests
     }
 
     [Fact]
-    public void UnrecognizedValueIsRejectedRatherThanTreatedAsOff()
+    public void UnrecognizedDevelopmentValueIsRejectedRatherThanTreatedAsOff()
     {
-        // Ignoring it would run outside the session the user asked for.
         SessionException exception = Assert.Throws<SessionException>(
             () => SessionRoutingPolicy.ReadMode(Environment("maybe")));
 
@@ -76,21 +82,22 @@ public sealed class SessionRoutingPolicyTests
     }
 
     [Fact]
-    public void SupportedMachineUsesTheSessionByDefault()
+    public void EnabledSelectionUsesTheSessionWhenAvailable()
     {
         SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
+            Enabled(),
             PackageFamilyName,
             Ready());
 
         Assert.Equal(SessionRouting.Session, decision.Routing);
+        Assert.Contains("enabled", decision.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ProbeOverridesAnUnsupportedBuildVerdict()
+    public void BackendProbeOverridesAnUnsupportedBuildVerdict()
     {
         SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
+            Enabled(),
             PackageFamilyName,
             Ready(backendAvailable: true, hostSupport: MxcHostSupport.Unsupported));
 
@@ -98,100 +105,15 @@ public sealed class SessionRoutingPolicyTests
     }
 
     [Fact]
-    public void ProbeSayingUnavailableRunsDirectly()
+    public void DisabledSelectionRunsDirectlyWithoutBackendAvailability()
     {
         SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
+            Disabled(),
             PackageFamilyName,
-            Ready(backendAvailable: false));
+            Ready(runtimeUnavailableReason: "absent"));
 
         Assert.Equal(SessionRouting.Direct, decision.Routing);
-        Assert.Contains("not available", decision.Reason, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void UnsupportedBuildWithoutAProbeRunsDirectly()
-    {
-        SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
-            PackageFamilyName,
-            Ready(backendAvailable: null, hostSupport: MxcHostSupport.Unsupported));
-
-        Assert.Equal(SessionRouting.Direct, decision.Routing);
-    }
-
-    [Fact]
-    public void UndeterminableSupportRunsDirectlyRatherThanGuessing()
-    {
-        SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
-            PackageFamilyName,
-            Ready(backendAvailable: null, hostSupport: MxcHostSupport.Unknown));
-
-        Assert.Equal(SessionRouting.Direct, decision.Routing);
-    }
-
-    [Fact]
-    public void ProbeFailureReasonIsCarriedIntoTheExplanation()
-    {
-        SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
-            PackageFamilyName,
-            Ready(
-                backendAvailable: null,
-                hostSupport: MxcHostSupport.Unknown,
-                probeFailureReason: "the executor crashed"));
-
-        Assert.Contains("the executor crashed", decision.Reason, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void MissingRuntimeRunsDirectly()
-    {
-        SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
-            PackageFamilyName,
-            Ready(runtimeUnavailableReason: "the runtime directory is absent"));
-
-        Assert.Equal(SessionRouting.Direct, decision.Routing);
-        Assert.Contains(
-            "the runtime directory is absent",
-            decision.Reason,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void UnpackagedBuildRunsDirectly()
-    {
-        SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
-            null,
-            Ready());
-
-        Assert.Equal(SessionRouting.Direct, decision.Routing);
-        Assert.Contains("installed package", decision.Reason, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DisabledModeRunsDirectlyEvenWhenSupported()
-    {
-        SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Disabled,
-            PackageFamilyName,
-            Ready());
-
-        Assert.Equal(SessionRouting.Direct, decision.Routing);
-    }
-
-    [Fact]
-    public void RequiredModeSucceedsWhenSupported()
-    {
-        SessionRoutingDecision decision = SessionRoutingPolicy.Decide(
-            SessionMode.Required,
-            PackageFamilyName,
-            Ready());
-
-        Assert.Equal(SessionRouting.Session, decision.Routing);
+        Assert.Contains("disabled", decision.Reason, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -199,43 +121,31 @@ public sealed class SessionRoutingPolicyTests
     [InlineData("no-runtime")]
     [InlineData("backend-unavailable")]
     [InlineData("unsupported-build")]
-    public void RequiredModeFailsLoudlyRatherThanFallingBack(string scenario)
+    [InlineData("unknown-support")]
+    public void EnabledSelectionFailsClosedWhenIsolationCannotBeUsed(string scenario)
     {
         (string? packageFamilyName, MxcReadinessReport readiness) = scenario switch
         {
             "unpackaged" => (null, Ready()),
             "no-runtime" => (PackageFamilyName, Ready(runtimeUnavailableReason: "absent")),
             "backend-unavailable" => (PackageFamilyName, Ready(backendAvailable: false)),
-            _ => (
+            "unsupported-build" => (
                 PackageFamilyName,
                 Ready(backendAvailable: null, hostSupport: MxcHostSupport.Unsupported)),
+            _ => (
+                PackageFamilyName,
+                Ready(
+                    backendAvailable: null,
+                    hostSupport: MxcHostSupport.Unknown,
+                    probeFailureReason: "the executor crashed")),
         };
 
         SessionException exception = Assert.Throws<SessionException>(
             () => SessionRoutingPolicy.Decide(
-                SessionMode.Required,
+                Enabled(),
                 packageFamilyName,
                 readiness));
 
-        Assert.Contains(
-            SessionRoutingPolicy.ModeVariable,
-            exception.Message,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void EveryDecisionCarriesAReason()
-    {
-        SessionRoutingDecision session = SessionRoutingPolicy.Decide(
-            SessionMode.Automatic,
-            PackageFamilyName,
-            Ready());
-        SessionRoutingDecision direct = SessionRoutingPolicy.Decide(
-            SessionMode.Disabled,
-            PackageFamilyName,
-            Ready());
-
-        Assert.False(string.IsNullOrWhiteSpace(session.Reason));
-        Assert.False(string.IsNullOrWhiteSpace(direct.Reason));
+        Assert.Contains("required", exception.Message, StringComparison.Ordinal);
     }
 }

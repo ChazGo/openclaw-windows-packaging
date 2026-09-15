@@ -32,6 +32,9 @@ public sealed class GatewayLauncherTests : IDisposable
             startInfo.Environment["OPENCLAW_SERVICE_REPAIR_POLICY"]);
         Assert.Equal("1", startInfo.Environment["OPENCLAW_NO_AUTO_UPDATE"]);
         Assert.Equal(
+            "disabled",
+            startInfo.Environment["OPENCLAW_GATEWAY_ISOLATION"]);
+        Assert.Equal(
             [Path.Combine(_payloadDirectory, "openclaw.mjs")],
             startInfo.ArgumentList);
     }

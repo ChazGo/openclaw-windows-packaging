@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Diagnostics.CodeAnalysis;
+using OpenClaw.Launcher.Gateway;
 using OpenClaw.SessionProtocol;
 
 namespace OpenClaw.Launcher;
@@ -162,27 +163,40 @@ internal static class Program
         Func<Action<string>, Session.SessionRuntime>? createSessionRuntime = null,
         Func<CancellationToken, Task<Mxc.MxcReadinessReport>>? probeReadiness = null,
         Func<string?>? getPackageFamilyName = null,
-        Func<string, string?>? readEnvironmentVariable = null)
+        Func<string, string?>? readEnvironmentVariable = null,
+        Func<string?, GatewayIsolationSelection>? resolveGatewayIsolation = null)
     {
         string applicationDirectory = GetPackagedApplicationDirectory(options);
         log("Using the OpenClaw application directly from the package.");
 
-        Session.SessionMode mode = Session.SessionRoutingPolicy.ReadMode(
-            readEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        Func<string, string?> environment =
+            readEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        string? packageFamilyName =
+            (getPackageFamilyName ?? (() => HostPaths.Create().PackageFamilyName))();
+        GatewayIsolationSelection isolation = (resolveGatewayIsolation ??
+            (familyName =>
+            {
+                HostPaths paths = HostPaths.Create();
+                return GatewayIsolationPolicy.Resolve(
+                    new GatewayIsolationStateStore(paths.GatewayIsolationStatePath),
+                    familyName is not null,
+                    GatewayIsolationPolicy.GetCurrentUserSid(),
+                    environment);
+            }))(packageFamilyName);
         Session.SessionRoutingDecision routing;
-        if (mode == Session.SessionMode.Disabled)
+        if (isolation.Mode == GatewayIsolationMode.Disabled)
         {
             routing = new Session.SessionRoutingDecision(
                 Session.SessionRouting.Direct,
-                $"{Session.SessionRoutingPolicy.ModeVariable} is set to 0.");
+                isolation.Reason);
         }
         else
         {
             Mxc.MxcReadinessReport readiness = await (probeReadiness ??
                 Mxc.MxcReadiness.ProbeAsync)(CancellationToken.None).ConfigureAwait(false);
             routing = Session.SessionRoutingPolicy.Decide(
-                mode,
-                (getPackageFamilyName ?? (() => HostPaths.Create().PackageFamilyName))(),
+                isolation,
+                packageFamilyName,
                 readiness);
         }
 

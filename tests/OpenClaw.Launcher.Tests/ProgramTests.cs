@@ -495,13 +495,14 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task AutomaticAgentLaunchUsesHostOnlyWhenReadinessReportsIsolationUnsupported()
+    public async Task DisabledAgentLaunchUsesHostWithoutProbingIsolation()
     {
         string applicationDirectory = Path.Combine(_testDirectory, "app");
         Directory.CreateDirectory(applicationDirectory);
         await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), string.Empty);
         bool resolvedHostNode = false;
         bool launchedHost = false;
+        bool probedReadiness = false;
 
         int exitCode = await Program.RunAgentAsync(
             new HostOptions(applicationDirectory, null, []),
@@ -519,19 +520,27 @@ public sealed class ProgramTests : IDisposable
                 launchedHost = true;
                 return Task.FromResult(17);
             },
-            probeReadiness: _ => Task.FromResult(new MxcReadinessReport(
-                "runtime",
-                null,
-                null,
-                MxcHostSupport.Unsupported,
-                null,
-                MxcSupportEvidence.HostBuild)),
+            probeReadiness: _ =>
+            {
+                probedReadiness = true;
+                return Task.FromResult(new MxcReadinessReport(
+                    "runtime",
+                    null,
+                    null,
+                    MxcHostSupport.Unsupported,
+                    null,
+                    MxcSupportEvidence.HostBuild));
+            },
             getPackageFamilyName: () => "OpenClaw.Gateway_test",
-            readEnvironmentVariable: _ => null);
+            readEnvironmentVariable: _ => null,
+            resolveGatewayIsolation: _ => new GatewayIsolationSelection(
+                GatewayIsolationMode.Disabled,
+                "Gateway isolation is disabled by persisted user state."));
 
         Assert.Equal(17, exitCode);
         Assert.True(resolvedHostNode);
         Assert.True(launchedHost);
+        Assert.False(probedReadiness);
     }
 
     [Fact]
@@ -563,7 +572,10 @@ public sealed class ProgramTests : IDisposable
                 MxcSupportEvidence.HostBuild)),
             getPackageFamilyName: () => "OpenClaw.Gateway_test",
             readEnvironmentVariable: name =>
-                name == SessionRoutingPolicy.ModeVariable ? "1" : null));
+                name == SessionRoutingPolicy.ModeVariable ? "0" : null,
+            resolveGatewayIsolation: _ => new GatewayIsolationSelection(
+                GatewayIsolationMode.Enabled,
+                "Gateway isolation is enabled by persisted user state.")));
 
         Assert.False(resolvedHostNode);
     }
@@ -602,7 +614,10 @@ public sealed class ProgramTests : IDisposable
                 null,
                 MxcSupportEvidence.HostBuild)),
             () => "OpenClaw.Gateway_test",
-            _ => null));
+            _ => null,
+            _ => new GatewayIsolationSelection(
+                GatewayIsolationMode.Enabled,
+                "Gateway isolation is enabled by persisted user state.")));
 
         Assert.False(resolvedHostNode);
         Assert.False(launchedHost);
