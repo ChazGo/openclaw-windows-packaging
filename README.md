@@ -190,12 +190,14 @@ they do not represent the default-disabled state of a normal install.
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by
 [`openclaw/openclaw#145409`](https://github.com/openclaw/openclaw/pull/145409).
-The minimum selected OpenClaw revision is its merged commit
-`f65ecca89667b8a55d9f88d76c487f0a0ab11da8`. The page consumes validated
-`openclaw:widget-theme` messages from its parent frame and follows built-in and
-custom light/dark themes without reloading. Direct opens and older compatible
-hosts still use the browser or operating system light/dark preference with a
-safe built-in palette.
+The current workflow remains on the release-approved OpenClaw baseline
+`0965053fe6b9341776df147a6934b7485c60b5ca` while this plugin is disabled by
+default. That baseline packages and inspects the plugin safely but does not
+forward selected Control UI themes into plugin frames. The future launcher
+enablement change must also advance and qualify the runtime to the merged theme
+forwarding commit `f65ecca89667b8a55d9f88d76c487f0a0ab11da8` or newer. Until
+then, the page uses the browser or operating system light/dark preference with
+a safe built-in palette.
 
 `scripts\Build-MSIX.ps1` downloads the official Node.js archive matching the
 payload's recorded build version and architecture, copies both inputs into
