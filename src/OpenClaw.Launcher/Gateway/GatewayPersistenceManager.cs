@@ -200,30 +200,22 @@ internal sealed class GatewayPersistenceManager
             _identity.Name,
             cancellationToken).ConfigureAwait(false);
 
-        CleanupResult fallback = RemoveFallback();
-        CleanupResult launcher = RemoveLauncher();
-        bool changed = fallback == CleanupResult.Removed || launcher == CleanupResult.Removed;
+        GatewayGeneratedFileRemoval fallback = RemoveGeneratedFile(FallbackPath);
+        GatewayGeneratedFileRemoval launcher = RemoveGeneratedFile(_options.LauncherPath);
+        string? detail = Combine(deletion.Detail, Combine(fallback.Detail, launcher.Detail));
 
-        if (!deletion.Succeeded || fallback == CleanupResult.Failed || launcher == CleanupResult.Failed)
+        if (!deletion.Succeeded || detail is not null)
         {
             return new GatewayPersistenceRemovalResult(
                 Succeeded: false,
-                changed,
+                fallback.Changed || launcher.Changed,
                 "Logon recovery could not be fully removed.",
-                Combine(
-                    deletion.Succeeded ? null : deletion.Detail,
-                    Combine(
-                        fallback == CleanupResult.Failed
-                            ? $"'{FallbackPath}' could not be removed."
-                            : null,
-                        launcher == CleanupResult.Failed
-                            ? $"'{_options.LauncherPath}' could not be removed."
-                            : null)));
+                detail);
         }
 
         return new GatewayPersistenceRemovalResult(
             Succeeded: true,
-            changed,
+            fallback.Changed || launcher.Changed,
             "Logon recovery is removed.");
     }
 
@@ -407,13 +399,13 @@ internal sealed class GatewayPersistenceManager
         }
     }
 
-    private CleanupResult RemoveFallback() =>
+    private GatewayGeneratedFileRemoval RemoveFallback() =>
         RemoveGeneratedFile(FallbackPath);
 
-    private CleanupResult RemoveLauncher() =>
+    private GatewayGeneratedFileRemoval RemoveLauncher() =>
         RemoveGeneratedFile(_options.LauncherPath);
 
-    private static CleanupResult RemoveGeneratedFile(string path)
+    private GatewayGeneratedFileRemoval RemoveGeneratedFile(string path)
     {
         // Only a file this installation generated is deleted. A same-named file
         // someone else placed there is left alone.
@@ -422,22 +414,26 @@ internal sealed class GatewayPersistenceManager
             if (!File.Exists(path) ||
                 !GatewayLauncherScript.LooksGenerated(File.ReadAllText(path)))
             {
-                return CleanupResult.Absent;
+                return new GatewayGeneratedFileRemoval(false, null);
             }
 
-            File.Delete(path);
-            return CleanupResult.Removed;
+            (_options.DeleteFile ?? File.Delete)(path);
+            return new GatewayGeneratedFileRemoval(true, null);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException)
         {
-            return CleanupResult.Failed;
+            return new GatewayGeneratedFileRemoval(
+                false,
+                $"Could not remove generated recovery file '{path}': {exception.Message}");
         }
     }
 
     private bool MatchesUserSid(string userId, string desiredSid) =>
         Same(userId, desiredSid) ||
         Same(_resolveUserSid(userId) ?? string.Empty, desiredSid);
+
+    private sealed record GatewayGeneratedFileRemoval(bool Changed, string? Detail);
 
     private static string? Combine(string? first, string? second) =>
         (string.IsNullOrWhiteSpace(first), string.IsNullOrWhiteSpace(second)) switch
@@ -451,10 +447,4 @@ internal sealed class GatewayPersistenceManager
     private static bool Same(string left, string right) =>
         string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
-    private enum CleanupResult
-    {
-        Absent,
-        Removed,
-        Failed,
-    }
 }
