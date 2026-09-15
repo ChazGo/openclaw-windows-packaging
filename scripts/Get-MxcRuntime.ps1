@@ -199,6 +199,15 @@ if (-not $CacheDirectory) {
 
 $provenancePath = Join-Path $OutputDirectory 'mxc-runtime.json'
 $stagedEntries = @($architectureLock.files) + @($lock.licenseFiles)
+$expectedStagedPaths = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase
+)
+foreach ($entry in $stagedEntries) {
+    [void]$expectedStagedPaths.Add(
+        $entry.stagedPath.Replace('/', [IO.Path]::DirectorySeparatorChar)
+    )
+}
+[void]$expectedStagedPaths.Add('mxc-runtime.json')
 
 # Re-verify rather than trusting the directory's existence: a stale or
 # tampered staging directory must not silently become package content.
@@ -213,6 +222,20 @@ if (-not $Force -and (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
         ) {
             $upToDate = $false
             break
+        }
+    }
+    if ($upToDate) {
+        foreach ($candidate in @(
+            Get-ChildItem -LiteralPath $OutputDirectory -File -Force -Recurse
+        )) {
+            $relativePath = [IO.Path]::GetRelativePath(
+                $OutputDirectory,
+                $candidate.FullName
+            )
+            if (-not $expectedStagedPaths.Contains($relativePath)) {
+                $upToDate = $false
+                break
+            }
         }
     }
 
