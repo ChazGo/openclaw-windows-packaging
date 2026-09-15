@@ -11,7 +11,13 @@ internal sealed record SessionExecutionRequest(
     string NodePath,
     string ApplicationDirectory,
     IReadOnlyList<string> Arguments,
-    string WorkingDirectory);
+    string WorkingDirectory)
+{
+    /// <summary>
+    /// Environment determined by the host entrypoint for this invocation.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? AdditionalEnvironment { get; init; }
+}
 
 /// <summary>
 /// An arbitrary foreground command to run inside the session.
@@ -79,7 +85,10 @@ internal sealed class SessionExecutor
                 request.HelperPath,
                 request.NodePath,
                 BuildNodeArguments(request),
-                request.WorkingDirectory),
+                request.WorkingDirectory)
+            {
+                AdditionalEnvironment = request.AdditionalEnvironment
+            },
             "Running OpenClaw in the isolated session.",
             "OpenClaw",
             cancellationToken).ConfigureAwait(false);
@@ -149,6 +158,94 @@ internal sealed class SessionExecutor
         {
             // Only this invocation's files are removed. Concurrent invocations
             // own differently named requests in the same shared workspace.
+            TryDelete(requestPath);
+            TryDelete(resultPath);
+        }
+    }
+
+    /// <summary>Installs the package's Node.js runtime in the agent profile.</summary>
+    public async Task<SessionRuntimeInstallResult> InstallRuntimeAsync(
+        SessionRecord record,
+        string helperPath,
+        string archivePath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentException.ThrowIfNullOrWhiteSpace(helperPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
+
+        if (string.IsNullOrWhiteSpace(record.WorkspacePath))
+        {
+            throw new SessionException(
+                "The recorded session has no shared workspace, so a runtime " +
+                "install request cannot be delivered to it.");
+        }
+
+        string requestId = Guid.NewGuid().ToString("N");
+        string requestPath = Path.Combine(record.WorkspacePath, $"runtime-{requestId}.json");
+        string resultPath = SessionLaunchProtocol.ResultPathFor(requestPath);
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                requestPath,
+                SessionRuntimeProtocol.SerializeRequest(new SessionRuntimeInstallRequest
+                {
+                    RequestId = requestId,
+                    ArchivePath = archivePath
+                }),
+                cancellationToken).ConfigureAwait(false);
+
+            _log("Installing the packaged Node.js runtime in the isolated session.");
+
+            MxcExecutionResult execution = await _backend.ExecuteAsync(
+                record.ToSandboxIdOrThrow(),
+                new MxcExecutionRequest(
+                    BuildGuestCommandLine(helperPath, requestPath, "--install-runtime")),
+                null,
+                cancellationToken).ConfigureAwait(false);
+
+            string resultText;
+            try
+            {
+                resultText = await File.ReadAllTextAsync(resultPath, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (
+                exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                throw new SessionException(
+                    "The isolated session did not report a runtime install " +
+                    DescribeMissingResult(execution));
+            }
+
+            SessionRuntimeInstallResult result =
+                SessionRuntimeProtocol.ReadResult(resultText);
+            if (result.Error is { Length: > 0 } error)
+            {
+                throw new SessionException(
+                    $"The packaged Node.js runtime could not be installed in the session: {error}");
+            }
+
+            if (!string.Equals(result.RequestId, requestId, StringComparison.Ordinal))
+            {
+                throw new SessionException(
+                    "The isolated session reported a runtime install result " +
+                    "for a different request.");
+            }
+
+            if (string.IsNullOrWhiteSpace(result.ExecutablePath) ||
+                string.IsNullOrWhiteSpace(result.Version))
+            {
+                throw new SessionException(
+                    "The isolated session reported a runtime install without a " +
+                    "Node.js executable path and version.");
+            }
+
+            return result;
+        }
+        finally
+        {
             TryDelete(requestPath);
             TryDelete(resultPath);
         }
@@ -298,5 +395,16 @@ internal sealed class SessionExecutor
             DirectoryNotFoundException)
         {
         }
+    }
+
+    private static string DescribeMissingResult(MxcExecutionResult execution)
+    {
+        string detail = string.Join(
+            " ",
+            new[] { execution.StandardOutput, execution.StandardError }
+                .Where(static value => !string.IsNullOrWhiteSpace(value)));
+        return string.IsNullOrWhiteSpace(detail)
+            ? $"result (executor exit code {execution.ExitCode})."
+            : $"result (executor exit code {execution.ExitCode}): {detail}";
     }
 }
