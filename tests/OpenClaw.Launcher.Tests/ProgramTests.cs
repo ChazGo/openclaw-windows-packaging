@@ -91,6 +91,146 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
+    public async Task InitialDisabledSetupPersistsOnlyAfterHostSetupSucceeds()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        var persisted = new List<GatewayIsolationMode>();
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--no-isolation"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
+                GatewayIsolationMode.Disabled,
+                PersistAfterSuccess: true,
+                GatewayIsolationSetupIntentSource.NoIsolationOption,
+                "Initial direct setup."),
+            persistGatewayIsolation: persisted.Add);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(["lock", "host"], lifecycle.Calls);
+        Assert.Equal([GatewayIsolationMode.Disabled], persisted);
+        Assert.Contains(
+            "without isolated-session provisioning",
+            output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InitialDisabledSetupFailureDoesNotPersistSelection()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime())
+        {
+            PrepareHostException = new IOException("runtime preparation failed"),
+        };
+        var persisted = new List<GatewayIsolationMode>();
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--no-isolation"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
+                GatewayIsolationMode.Disabled,
+                PersistAfterSuccess: true,
+                GatewayIsolationSetupIntentSource.NoIsolationOption,
+                "Initial direct setup."),
+            persistGatewayIsolation: persisted.Add);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(["lock", "host"], lifecycle.Calls);
+        Assert.Empty(persisted);
+        Assert.Contains("runtime preparation failed", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InitialEnabledSetupPersistsAfterIsolatedSetupSucceeds()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        var persisted = new List<GatewayIsolationMode>();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
+                GatewayIsolationMode.Enabled,
+                PersistAfterSuccess: true,
+                GatewayIsolationSetupIntentSource.DefaultSelection,
+                "Initial isolated setup."),
+            persistGatewayIsolation: persisted.Add);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal([GatewayIsolationMode.Enabled], persisted);
+    }
+
+    [Fact]
+    public async Task DisabledFreshSetupFailsInsteadOfIgnoringFresh()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        var persisted = new List<GatewayIsolationMode>();
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--no-isolation", "--fresh"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
+                GatewayIsolationMode.Disabled,
+                PersistAfterSuccess: true,
+                GatewayIsolationSetupIntentSource.NoIsolationOption,
+                "Initial direct setup."),
+            persistGatewayIsolation: persisted.Add);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(lifecycle.Calls);
+        Assert.Empty(persisted);
+        Assert.Contains(
+            "--fresh requires isolated-session provisioning",
+            output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SetupIntentConflictIsReportedWithoutStartingSetup()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--no-isolation"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => throw new GatewayIsolationException(
+                "Use `clawctl gateway-isolation disable`."));
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(lifecycle.Calls);
+        Assert.Contains("gateway-isolation disable", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AgentUsesTheRuntimeInstalledForTheSessionWithoutHostFallback()
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
@@ -163,18 +303,20 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Theory]
-    [InlineData("--no-isolation", null)]
-    [InlineData(null, "0")]
+    [InlineData("--no-isolation --fresh", null)]
+    [InlineData("--fresh --no-isolation", null)]
+    [InlineData("--no-isolation --fresh --force", null)]
+    [InlineData("--fresh --force --no-isolation", null)]
+    [InlineData("--fresh", "0")]
+    [InlineData("--fresh --force", "0")]
     public async Task FreshSetupRejectsDisabledIsolationBeforePreparingTheHostRuntime(
-        string? option,
+        string argumentText,
         string? sessionMode)
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
         var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
         using var output = new StringWriter();
-        string[] arguments = option is null
-            ? ["setup", "--fresh"]
-            : ["setup", "--fresh", option];
+        string[] arguments = ["setup", .. argumentText.Split(' ')];
 
         int exitCode = await Program.RunControlAsync(
             CreateSetupOptions(applicationDirectory),
@@ -187,8 +329,38 @@ public sealed class ProgramTests : IDisposable
                 name == SessionRoutingPolicy.ModeVariable ? sessionMode : null);
 
         Assert.Equal(1, exitCode);
+        Assert.True(lifecycle.SupportChecked);
         Assert.Empty(lifecycle.Calls);
         Assert.Contains("--fresh requires isolated-session provisioning", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PersistedDisabledFreshSetupRemainsADeferredExecutionPolicy()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
+                GatewayIsolationMode.Disabled,
+                PersistAfterSuccess: false,
+                GatewayIsolationSetupIntentSource.PersistedSelection,
+                "Setup preserves the persisted disabled selection."));
+
+        Assert.Equal(1, exitCode);
+        Assert.True(lifecycle.SupportChecked);
+        Assert.Empty(lifecycle.Calls);
+        Assert.Contains(
+            "mode-aware execution policy from a later layer",
+            output.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -501,13 +673,25 @@ public sealed class ProgramTests : IDisposable
         {
             TeardownSucceeds = true
         };
+        var persisted = new List<GatewayIsolationMode>();
         using var output = new StringWriter();
 
         int exitCode = await Program.RunControlAsync(
             CreateSetupOptions(applicationDirectory),
-            ["setup", "--fresh"], _ => { }, output, TextWriter.Null, installationLifecycle: lifecycle);
+            ["setup", "--fresh"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
+                GatewayIsolationMode.Enabled,
+                PersistAfterSuccess: true,
+                GatewayIsolationSetupIntentSource.DefaultSelection,
+                "Initial isolated setup."),
+            persistGatewayIsolation: persisted.Add);
 
         Assert.Equal(1, exitCode);
+        Assert.Empty(persisted);
         Assert.Equal(
             ["validate", "lock", "recovery", "gateway", "session", "clean"],
             lifecycle.Calls);
@@ -600,13 +784,14 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task AutomaticAgentLaunchUsesHostOnlyWhenReadinessReportsIsolationUnsupported()
+    public async Task DisabledAgentLaunchUsesHostWithoutProbingIsolation()
     {
         string applicationDirectory = Path.Combine(_testDirectory, "app");
         Directory.CreateDirectory(applicationDirectory);
         await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), string.Empty);
         bool resolvedHostNode = false;
         bool launchedHost = false;
+        bool probedReadiness = false;
 
         int exitCode = await Program.RunAgentAsync(
             new HostOptions(applicationDirectory, null, []),
@@ -624,19 +809,27 @@ public sealed class ProgramTests : IDisposable
                 launchedHost = true;
                 return Task.FromResult(17);
             },
-            probeReadiness: _ => Task.FromResult(new MxcReadinessReport(
-                "runtime",
-                null,
-                null,
-                MxcHostSupport.Unsupported,
-                null,
-                MxcSupportEvidence.HostBuild)),
+            probeReadiness: _ =>
+            {
+                probedReadiness = true;
+                return Task.FromResult(new MxcReadinessReport(
+                    "runtime",
+                    null,
+                    null,
+                    MxcHostSupport.Unsupported,
+                    null,
+                    MxcSupportEvidence.HostBuild));
+            },
             getPackageFamilyName: () => "OpenClaw.Gateway_test",
-            readEnvironmentVariable: _ => null);
+            readEnvironmentVariable: _ => null,
+            resolveGatewayIsolation: _ => new GatewayIsolationSelection(
+                GatewayIsolationMode.Disabled,
+                "Gateway isolation is disabled by persisted user state."));
 
         Assert.Equal(17, exitCode);
         Assert.True(resolvedHostNode);
         Assert.True(launchedHost);
+        Assert.False(probedReadiness);
     }
 
     [Fact]
@@ -668,7 +861,10 @@ public sealed class ProgramTests : IDisposable
                 MxcSupportEvidence.HostBuild)),
             getPackageFamilyName: () => "OpenClaw.Gateway_test",
             readEnvironmentVariable: name =>
-                name == SessionRoutingPolicy.ModeVariable ? "1" : null));
+                name == SessionRoutingPolicy.ModeVariable ? "0" : null,
+            resolveGatewayIsolation: _ => new GatewayIsolationSelection(
+                GatewayIsolationMode.Enabled,
+                "Gateway isolation is enabled by persisted user state.")));
 
         Assert.False(resolvedHostNode);
     }
@@ -707,7 +903,10 @@ public sealed class ProgramTests : IDisposable
                 null,
                 MxcSupportEvidence.HostBuild)),
             () => "OpenClaw.Gateway_test",
-            _ => null));
+            _ => null,
+            _ => new GatewayIsolationSelection(
+                GatewayIsolationMode.Enabled,
+                "Gateway isolation is enabled by persisted user state.")));
 
         Assert.False(resolvedHostNode);
         Assert.False(launchedHost);
@@ -902,25 +1101,40 @@ public sealed class ProgramTests : IDisposable
 
         public bool TeardownSucceeds { get; init; }
 
+        public Exception? PrepareHostException { get; init; }
+
         public ManualResetEventSlim ProvisionStarted { get; } = new(false);
 
         public ManualResetEventSlim AllowProvision { get; } = new(false);
 
         public int TeardownCount { get; private set; }
 
+        public bool SupportChecked { get; private set; }
+
         public SessionRuntime CreateRuntime(Action<string> log) => _runtime;
 
         public Task<SessionRoutingDecision> CheckSessionSupportAsync(
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new SessionRoutingDecision(
+            CancellationToken cancellationToken)
+        {
+            SupportChecked = true;
+            return Task.FromResult(new SessionRoutingDecision(
                 SessionRouting.Session,
                 "The isolated-session runtime is available."));
+        }
 
-        public NodeRuntime PrepareHostRuntime(HostOptions options, Action<string> log) =>
-            new(
+        public NodeRuntime PrepareHostRuntime(HostOptions options, Action<string> log)
+        {
+            Calls.Add("host");
+            if (PrepareHostException is not null)
+            {
+                throw PrepareHostException;
+            }
+
+            return new(
                 "node.exe",
                 new Version(24, 20, 0),
                 System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+        }
 
         public PackageRuntimeMetadata ValidatePackageRuntime(
             HostOptions options,

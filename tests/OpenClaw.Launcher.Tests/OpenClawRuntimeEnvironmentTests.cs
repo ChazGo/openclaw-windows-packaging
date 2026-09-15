@@ -1,3 +1,5 @@
+using OpenClaw.Launcher.Gateway;
+
 namespace OpenClaw.Launcher.Tests;
 
 public sealed class OpenClawRuntimeEnvironmentTests
@@ -105,6 +107,16 @@ public sealed class OpenClawRuntimeEnvironmentTests
         Assert.DoesNotContain("OPENAI_API_KEY", result.Keys);
         Assert.DoesNotContain("PATH", result.Keys);
         Assert.Equal("external", result["OPENCLAW_SUPERVISOR_MODE"]);
+        Assert.Equal("enabled", result["OPENCLAW_GATEWAY_ISOLATION"]);
+    }
+
+    [Fact]
+    public void BuildReportsDisabledIsolationForDirectExecution()
+    {
+        IReadOnlyDictionary<string, string> result =
+            OpenClawRuntimeEnvironment.Build(GatewayIsolationMode.Disabled);
+
+        Assert.Equal("disabled", result["OPENCLAW_GATEWAY_ISOLATION"]);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using OpenClaw.Launcher.Mxc;
+using OpenClaw.Launcher.Gateway;
 
 namespace OpenClaw.Launcher.Session;
 
@@ -75,17 +76,81 @@ internal static class SessionRoutingPolicy
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A machine that cannot host sessions runs directly, exactly as it did
-    /// before this feature existed. That is a capability of the machine, not a
-    /// failure to hide.
+    /// A disabled selection runs directly without probing. An enabled
+    /// selection is required and never degrades to direct execution.
     /// </para>
     /// <para>
-    /// There is deliberately no fallback once a session is chosen. A backend
+    /// There is deliberately no fallback once isolation is enabled. A backend
     /// that breaks on a supported machine must surface, not quietly relocate
     /// the user's work onto the host with a different profile and different
     /// isolation.
     /// </para>
     /// </remarks>
+    public static SessionRoutingDecision Decide(
+        GatewayIsolationSelection selection,
+        string? packageFamilyName,
+        MxcReadinessReport readiness)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        ArgumentNullException.ThrowIfNull(readiness);
+
+        if (selection.Mode == GatewayIsolationMode.Disabled)
+        {
+            return new SessionRoutingDecision(
+                SessionRouting.Direct,
+                selection.Reason);
+        }
+
+        if (packageFamilyName is null)
+        {
+            return Unavailable(
+                selection,
+                "OpenClaw is not running from its installed package, so it has " +
+                "no identity to provision an isolated session with.");
+        }
+
+        if (!readiness.RuntimeAvailable)
+        {
+            return Unavailable(
+                selection,
+                "The isolated-session runtime is unavailable: " +
+                (readiness.RuntimeUnavailableReason ?? "no reason was reported."));
+        }
+
+        if (readiness.BackendProbe is { IsolationSessionAvailable: false })
+        {
+            return Unavailable(
+                selection,
+                "This machine's isolated-session backend reported that it is " +
+                "not available.");
+        }
+
+        if (readiness.BackendProbe is null &&
+            readiness.HostSupport != MxcHostSupport.Supported)
+        {
+            string detail = readiness.HostSupport == MxcHostSupport.Unsupported
+                ? "This Windows build does not support isolated agent sessions."
+                : "Isolated-session support could not be determined on this machine.";
+            return Unavailable(
+                selection,
+                readiness.BackendProbeFailureReason is null
+                    ? detail
+                    : $"{detail} The backend probe failed: " +
+                      readiness.BackendProbeFailureReason);
+        }
+
+        return new SessionRoutingDecision(
+            SessionRouting.Session,
+            $"{selection.Reason} The isolated-session backend is available.");
+    }
+
+    private static SessionRoutingDecision Unavailable(
+        GatewayIsolationSelection selection,
+        string reason) =>
+        throw new SessionException(
+            $"{selection.Reason} An isolated session is required, but one cannot " +
+            $"be used. {reason}");
+
     public static SessionRoutingDecision Decide(
         SessionMode mode,
         string? packageFamilyName,
@@ -102,40 +167,33 @@ internal static class SessionRoutingPolicy
 
         if (packageFamilyName is null)
         {
-            return Unavailable(
+            return UnavailableForCapability(
                 mode,
-                "OpenClaw is not running from its installed package, so it has " +
-                "no identity to provision an isolated session with.");
+                "OpenClaw is not running from its installed package.");
         }
 
         if (!readiness.RuntimeAvailable)
         {
-            return Unavailable(
+            return UnavailableForCapability(
                 mode,
-                "The isolated-session runtime is unavailable: " +
-                (readiness.RuntimeUnavailableReason ?? "no reason was reported."));
+                readiness.RuntimeUnavailableReason ?? "The runtime is unavailable.");
         }
 
         if (readiness.BackendProbe is { IsolationSessionAvailable: false })
         {
-            return Unavailable(
+            return UnavailableForCapability(
                 mode,
-                "This machine's isolated-session backend reported that it is " +
-                "not available.");
+                "The isolated-session backend is unavailable.");
         }
 
         if (readiness.BackendProbe is null &&
             readiness.HostSupport != MxcHostSupport.Supported)
         {
-            string detail = readiness.HostSupport == MxcHostSupport.Unsupported
-                ? "This Windows build does not support isolated agent sessions."
-                : "Isolated-session support could not be determined on this machine.";
-            return Unavailable(
+            return UnavailableForCapability(
                 mode,
-                readiness.BackendProbeFailureReason is null
-                    ? detail
-                    : $"{detail} The backend probe failed: " +
-                      readiness.BackendProbeFailureReason);
+                readiness.HostSupport == MxcHostSupport.Unsupported
+                    ? "This Windows build does not support isolated agent sessions."
+                    : "Isolated-session support could not be determined.");
         }
 
         return new SessionRoutingDecision(
@@ -143,10 +201,11 @@ internal static class SessionRoutingPolicy
             "The isolated-session backend is available.");
     }
 
-    private static SessionRoutingDecision Unavailable(SessionMode mode, string reason) =>
+    private static SessionRoutingDecision UnavailableForCapability(
+        SessionMode mode,
+        string reason) =>
         mode == SessionMode.Required
             ? throw new SessionException(
-                $"{ModeVariable} requires an isolated session, but one cannot " +
-                $"be used. {reason}")
+                $"{ModeVariable} requires an isolated session. {reason}")
             : new SessionRoutingDecision(SessionRouting.Direct, reason);
 }

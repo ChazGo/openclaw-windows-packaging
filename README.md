@@ -43,7 +43,9 @@ copy, repair, or otherwise change package files at runtime.
 Every OpenClaw child process runs with
 `OPENCLAW_SUPERVISOR_MODE=external`,
 `OPENCLAW_SERVICE_REPAIR_POLICY=external`, and
-`OPENCLAW_NO_AUTO_UPDATE=1`. These declare external lifecycle ownership,
+`OPENCLAW_NO_AUTO_UPDATE=1`. It also receives
+`OPENCLAW_GATEWAY_ISOLATION=enabled|disabled` so diagnostics can identify the
+selected execution context. These declare external lifecycle ownership,
 prevent doctor-owned service repair, and disable configured background
 auto-updates. The pinned OpenClaw `v2026.8.2` release honors external supervisor
 mode by refusing native service mutation and OpenClaw self-update with guidance
@@ -61,7 +63,7 @@ the read-only application directory the workspace.
 |---|---|
 | `clawctl setup` | On a session-capable Windows build, confirm packaged `app\openclaw.mjs` exists, provision or reuse the owned isolated session, and install the bundled Node.js runtime in the agent profile. It does not prepare the invoking user's host runtime. It also configures gateway sign-in recovery without starting a gateway. |
 | `clawctl setup --no-isolation` | After the isolated-session support check, prepare the invoking user's host runtime without provisioning the isolated session. |
-| `clawctl setup --fresh [--force]` | Remove this installation's owned session and package-local state, then run setup again. Without `--force`, incomplete external cleanup stops before local state is erased. `--force` is valid only with `--fresh`; it preserves an explicit warning when cleanup of owned external resources cannot be confirmed, but still stops if bounded local deletion fails. |
+| `clawctl setup --fresh [--force]` | Remove this installation's owned session and package-local state, then run setup again. Explicit `--no-isolation` or `OPENCLAW_SESSION=0` rejects fresh setup before mutation; a persisted Disabled selection is reserved for later mode-aware execution policy. Without `--force`, incomplete external cleanup stops before local state is erased. `--force` is valid only with `--fresh`; it cannot bypass the isolation rejection. |
 | `clawctl status` | Report the recorded isolated-session state without provisioning or replacing it. It asks the backend to start the recorded provision as its status probe, so it is not a passive diagnostic. Use `clawctl gateway-service status` to inspect the gateway. |
 | `clawctl teardown [--force]` | Stop and deprovision the owned session and remove its setup state. The MSIX remains installed. |
 | `clawctl pwsh` | Open an interactive PowerShell session inside the agent session. |
@@ -109,6 +111,22 @@ bundled Node.js runtime and command environment as well. Run setup before
 using `openclaw`, `clawctl pwsh`, or gateway-service start. See
 [MXC compatibility evidence](docs/mxc-compatibility-evidence.md) for the
 session model, routing, gateway health criteria, and diagnostics limits.
+
+Installed `openclaw` launches read the user-owned selection from
+`LocalState\OpenClawGatewayMSIX\gateway-isolation.json`. The versioned record
+contains `mode`, `ownerSid`, and `updatedUtc`. A missing record defaults to
+required isolation; malformed, unsupported, or foreign-owner state stops the
+launch rather than routing directly. Unpackaged development launches remain
+direct by default and may use `OPENCLAW_SESSION`; installed launches do not
+allow that development override to contradict persisted state. This layer does
+not yet expose `clawctl` commands to change the selection.
+
+For initial installed setup, plain `clawctl setup` selects Enabled and
+`clawctl setup --no-isolation` selects Disabled. The selection is written only
+after setup succeeds. `OPENCLAW_SESSION` may match an existing installed
+selection for diagnosis, but cannot change or contradict it; use the
+gateway-isolation transition commands introduced by later layers to change an
+existing selection.
 
 The launcher places Node.js in a Windows job configured with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The launcher remains alive while Node.js

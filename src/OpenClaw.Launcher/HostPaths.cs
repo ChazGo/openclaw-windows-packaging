@@ -97,6 +97,9 @@ internal sealed class HostPaths
 
     public string SessionStatePath => Path.Combine(StateRoot, "session.json");
 
+    public string GatewayIsolationStatePath =>
+        Path.Combine(StateRoot, "gateway-isolation.json");
+
     /// <summary>
     /// The marker written only after explicit setup completes all of its
     /// session, launch-configuration, and sign-in-recovery steps.

@@ -1,3 +1,4 @@
+using OpenClaw.Launcher.Gateway;
 using OpenClaw.Launcher.Mxc;
 using OpenClaw.Launcher.Session;
 using OpenClaw.SessionProtocol;
@@ -683,7 +684,8 @@ public sealed class OpenClawRuntimeEnvironmentTests
                     application,
                     []);
 
-            foreach ((string name, string value) in OpenClawRuntimeEnvironment.Build())
+            foreach ((string name, string value) in OpenClawRuntimeEnvironment.Build(
+                GatewayIsolationMode.Disabled))
             {
                 Assert.Equal(value, startInfo.Environment[name]);
             }

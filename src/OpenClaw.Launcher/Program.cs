@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Diagnostics.CodeAnalysis;
+using OpenClaw.Launcher.Gateway;
 using OpenClaw.SessionProtocol;
 
 namespace OpenClaw.Launcher;
@@ -110,7 +111,9 @@ internal static class Program
                     startup.Output,
                     startup.Error,
                     startup.ResolveNode,
-                    startup.InstallationLifecycle).ConfigureAwait(false)
+                    startup.InstallationLifecycle,
+                    readEnvironmentVariable: startup.ReadEnvironmentVariable)
+                    .ConfigureAwait(false)
                 : await RunAgentAsync(
                     options,
                     WriteDiagnostic,
@@ -167,27 +170,40 @@ internal static class Program
         Func<CancellationToken, Task<Mxc.MxcReadinessReport>>? probeReadiness = null,
         Func<string?>? getPackageFamilyName = null,
         Func<string, string?>? readEnvironmentVariable = null,
+        Func<string?, GatewayIsolationSelection>? resolveGatewayIsolation = null,
         Func<bool>? isInteractive = null)
     {
         string applicationDirectory = GetPackagedApplicationDirectory(options);
         log("Using the OpenClaw application directly from the package.");
 
-        Session.SessionMode mode = Session.SessionRoutingPolicy.ReadMode(
-            readEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        Func<string, string?> environment =
+            readEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        string? packageFamilyName =
+            (getPackageFamilyName ?? (() => HostPaths.Create().PackageFamilyName))();
+        GatewayIsolationSelection isolation = (resolveGatewayIsolation ??
+            (familyName =>
+            {
+                HostPaths paths = HostPaths.Create();
+                return GatewayIsolationPolicy.Resolve(
+                    new GatewayIsolationStateStore(paths.GatewayIsolationStatePath),
+                    familyName is not null,
+                    GatewayIsolationPolicy.GetCurrentUserSid(),
+                    environment);
+            }))(packageFamilyName);
         Session.SessionRoutingDecision routing;
-        if (mode == Session.SessionMode.Disabled)
+        if (isolation.Mode == GatewayIsolationMode.Disabled)
         {
             routing = new Session.SessionRoutingDecision(
                 Session.SessionRouting.Direct,
-                $"{Session.SessionRoutingPolicy.ModeVariable} is set to 0.");
+                isolation.Reason);
         }
         else
         {
             Mxc.MxcReadinessReport readiness = await (probeReadiness ??
                 Mxc.MxcReadiness.ProbeAsync)(CancellationToken.None).ConfigureAwait(false);
             routing = Session.SessionRoutingPolicy.Decide(
-                mode,
-                (getPackageFamilyName ?? (() => HostPaths.Create().PackageFamilyName))(),
+                isolation,
+                packageFamilyName,
                 readiness);
         }
 
@@ -212,7 +228,8 @@ internal static class Program
                 {
                     AdditionalEnvironment = OpenClawRuntimeEnvironment.Build(
                         (isInteractive ?? (() => WindowsHostConsole.Instance.IsInteractive))(),
-                        readEnvironmentVariable ?? Environment.GetEnvironmentVariable)
+                        environment,
+                        isolation.Mode)
                 },
                 CancellationToken.None).ConfigureAwait(false);
         }
@@ -241,7 +258,9 @@ internal static class Program
         TextWriter error,
         Func<CancellationToken, Task<NodeRuntime>>? resolveNode = null,
         Session.IInstallationLifecycle? installationLifecycle = null,
-        Func<string, string?>? readEnvironmentVariable = null)
+        Func<string, string?>? readEnvironmentVariable = null,
+        Func<SetupOptions, GatewayIsolationSetupPlan>? resolveGatewayIsolationSetup = null,
+        Action<GatewayIsolationMode>? persistGatewayIsolation = null)
     {
         _ = resolveNode;
         Session.IInstallationLifecycle lifecycle =
@@ -261,6 +280,8 @@ internal static class Program
                     log,
                     output,
                     readEnvironmentVariable ?? Environment.GetEnvironmentVariable,
+                    resolveGatewayIsolationSetup,
+                    persistGatewayIsolation,
                     cancellationToken),
                 Status = async cancellationToken =>
                 {
@@ -395,6 +416,8 @@ internal static class Program
         Action<string> log,
         TextWriter output,
         Func<string, string?> readEnvironmentVariable,
+        Func<SetupOptions, GatewayIsolationSetupPlan>? resolveGatewayIsolationSetup,
+        Action<GatewayIsolationMode>? persistGatewayIsolation,
         CancellationToken cancellationToken)
     {
         string applicationDirectory = GetPackagedApplicationDirectory(options);
@@ -411,24 +434,91 @@ internal static class Program
             return 1;
         }
 
-        if (setupOptions.NoIsolation ||
-            Session.SessionRoutingPolicy.ReadMode(
-                readEnvironmentVariable) == Session.SessionMode.Disabled)
+        Session.SessionMode environmentMode =
+            Session.SessionRoutingPolicy.ReadMode(readEnvironmentVariable);
+        if (setupOptions.Fresh &&
+            (setupOptions.NoIsolation || environmentMode == Session.SessionMode.Disabled))
+        {
+            await output.WriteLineAsync(
+                "OpenClaw setup --fresh requires isolated-session provisioning. " +
+                "Remove --fresh or enable isolation before retrying.")
+                .ConfigureAwait(false);
+            return 1;
+        }
+
+        HostPaths paths = HostPaths.Create();
+        string ownerSid = GatewayIsolationPolicy.GetCurrentUserSid();
+        GatewayIsolationStateStore? isolationStore = paths.PackageFamilyName is null
+            ? null
+            : new GatewayIsolationStateStore(paths.GatewayIsolationStatePath);
+        GatewayIsolationSetupPlan isolationPlan;
+        try
+        {
+            isolationPlan =
+                (resolveGatewayIsolationSetup ?? (requested =>
+                    GatewayIsolationPolicy.ResolveSetup(
+                        isolationStore,
+                        paths.PackageFamilyName is not null,
+                        ownerSid,
+                        requested.NoIsolation,
+                        readEnvironmentVariable)))(setupOptions);
+        }
+        catch (Exception exception) when (
+            exception is GatewayIsolationException or Session.SessionException)
+        {
+            log($"Gateway-isolation setup intent could not be resolved: {exception.Message}");
+            await output.WriteLineAsync(
+                $"OpenClaw setup could not continue: {exception.Message}")
+                .ConfigureAwait(false);
+            return 1;
+        }
+        Action<GatewayIsolationMode> persistIsolation =
+            persistGatewayIsolation ?? (mode =>
+                isolationStore?.Write(new GatewayIsolationRecord
+                {
+                    Mode = mode,
+                    OwnerSid = ownerSid,
+                }));
+        log(isolationPlan.Reason);
+
+        if (isolationPlan.Mode == GatewayIsolationMode.Disabled)
         {
             if (setupOptions.Fresh)
             {
                 await output.WriteLineAsync(
-                    "OpenClaw setup --fresh requires isolated-session provisioning. Remove --fresh or enable isolation before retrying.")
+                    "OpenClaw setup --fresh with a persisted Disabled selection " +
+                    "requires the mode-aware execution policy from a later layer.")
                     .ConfigureAwait(false);
                 return 1;
             }
 
-            NodeRuntime nodeRuntime = lifecycle.PrepareHostRuntime(options, log);
-            ClawCtlConsole.WriteNodeRuntimeSummary(output, nodeRuntime);
-            await output.WriteLineAsync(
-                "OpenClaw setup completed without isolated-session provisioning.")
-                .ConfigureAwait(false);
-            return 0;
+            try
+            {
+                Session.SessionRuntime runtime = getSessionRuntime();
+                using Session.ISessionLockHandle handle =
+                    lifecycle.AcquireLifecycleLock(runtime);
+                NodeRuntime nodeRuntime = lifecycle.PrepareHostRuntime(options, log);
+                ClawCtlConsole.WriteNodeRuntimeSummary(output, nodeRuntime);
+                if (isolationPlan.PersistAfterSuccess)
+                {
+                    persistIsolation(GatewayIsolationMode.Disabled);
+                }
+
+                await output.WriteLineAsync(
+                    "OpenClaw setup completed without isolated-session provisioning.")
+                    .ConfigureAwait(false);
+                return 0;
+            }
+            catch (Exception exception) when (
+                exception is Session.SessionException or GatewayIsolationException or
+                IOException or UnauthorizedAccessException)
+            {
+                log($"Direct OpenClaw setup could not complete: {exception.Message}");
+                await output.WriteLineAsync(
+                    $"OpenClaw setup could not complete: {exception.Message}")
+                    .ConfigureAwait(false);
+                return 1;
+            }
         }
 
         try
@@ -498,15 +588,34 @@ internal static class Program
                 }
 
                 return await RunSetupCoreAsync(
-                    runtime, options, lifecycle, output, log, lockAlreadyHeld: true, cancellationToken)
+                    runtime,
+                    options,
+                    lifecycle,
+                    output,
+                    log,
+                    lockAlreadyHeld: true,
+                    cancellationToken,
+                    isolationPlan.PersistAfterSuccess
+                        ? () => persistIsolation(GatewayIsolationMode.Enabled)
+                        : null)
                     .ConfigureAwait(false);
             }
 
             return await RunSetupCoreAsync(
-                runtime, options, lifecycle, output, log, lockAlreadyHeld: false, cancellationToken)
+                runtime,
+                options,
+                lifecycle,
+                output,
+                log,
+                lockAlreadyHeld: false,
+                cancellationToken,
+                isolationPlan.PersistAfterSuccess
+                    ? () => persistIsolation(GatewayIsolationMode.Enabled)
+                    : null)
                 .ConfigureAwait(false);
         }
-        catch (Session.SessionException exception)
+        catch (Exception exception) when (
+            exception is Session.SessionException or GatewayIsolationException)
         {
             log($"Isolated session setup is unavailable: {exception.Message}");
             await output.WriteLineAsync($"OpenClaw setup could not complete: {exception.Message}")
@@ -547,7 +656,8 @@ internal static class Program
         TextWriter output,
         Action<string> log,
         bool lockAlreadyHeld,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? completeIsolationSelection = null)
     {
         using Session.ISessionLockHandle? handle = lockAlreadyHeld
             ? null
@@ -587,6 +697,7 @@ internal static class Program
         }
 
         runtime.CompleteSetup(record, agentRuntime, startupEnabled: true);
+        completeIsolationSelection?.Invoke();
         await output.WriteLineAsync("OpenClaw isolated session is ready.").ConfigureAwait(false);
         return 0;
     }
