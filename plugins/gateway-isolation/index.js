@@ -228,7 +228,7 @@ export function renderGatewayIsolationPage(mode) {
       <div class="settings-row settings-row--stacked">
         <div>
           <div class="settings-row__title">Change with CLI</div>
-          <div class="settings-row__description">Run from the signed-in user session on the Gateway host.</div>
+          <div class="settings-row__description">Command support is expected in a paired launcher update. Run from the signed-in user session on the Gateway host after that support is installed.</div>
         </div>
         <div class="settings-row__control command">
           <code id="isolation-command">${command}</code>

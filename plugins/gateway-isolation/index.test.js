@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import {
@@ -6,6 +7,15 @@ import {
   readGatewayIsolationMode,
   renderGatewayIsolationPage,
 } from "./index.js";
+
+test("ships disabled by default while retaining explicit startup activation", () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf8"),
+  );
+  assert.equal(manifest.enabledByDefault, false);
+  assert.equal(manifest.enabledByDefaultOnPlatforms, undefined);
+  assert.equal(manifest.activation.onStartup, true);
+});
 
 function registerPlugin(mode) {
   const descriptors = [];
@@ -117,7 +127,14 @@ for (const expected of [
     assert.match(html, new RegExp(`>${expected.status}<`));
     assert.match(html, new RegExp(expected.tone));
     assert.match(html, /Change with CLI/);
-    assert.match(html, /Run from the signed-in user session on the Gateway host\./);
+    assert.match(
+      html,
+      /Command support is expected in a paired launcher update\./,
+    );
+    assert.match(
+      html,
+      /Run from the signed-in user session on the Gateway host after that support is installed\./,
+    );
     assert.match(html, new RegExp(expected.command));
     assert.match(html, /aria-label="Copy command"/);
     assert.match(html, /Copy the selected command manually\./);

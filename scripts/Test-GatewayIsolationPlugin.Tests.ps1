@@ -31,11 +31,16 @@ try {
         ConvertFrom-Json
     if (
         $manifest.id -ne 'gateway-isolation' -or
-        $manifest.enabledByDefault -ne $true -or
+        $manifest.enabledByDefault -ne $false -or
+        (
+            $manifest.PSObject.Properties.Name -contains
+            'enabledByDefaultOnPlatforms' -and
+            @($manifest.enabledByDefaultOnPlatforms).Count -ne 0
+        ) -or
         $manifest.activation.onStartup -ne $true -or
         $manifest.configSchema.additionalProperties -ne $false
     ) {
-        throw 'Gateway isolation plugin manifest is not valid for automatic startup.'
+        throw 'Gateway isolation plugin manifest is not valid for explicit enablement.'
     }
 
     $package = Get-Content `
@@ -62,23 +67,24 @@ try {
     Set-Content `
         -LiteralPath (Join-Path $packageSource 'openclaw.mjs') `
         -Value @'
-const inspection = {
+const args = process.argv.slice(2);
+const runtime = args.includes("--runtime");
+console.log(JSON.stringify({
   plugin: {
     id: "gateway-isolation",
     origin: "bundled",
-    enabled: true,
-    activated: true,
-    status: "loaded",
-    imported: true,
-    httpRoutes: 1
+    enabled: false,
+    activated: runtime,
+    status: runtime ? "loaded" : "disabled",
+    imported: runtime,
+    httpRoutes: runtime ? 1 : 0
   },
-  httpRouteCount: 1,
+  httpRouteCount: runtime ? 1 : 0,
   gatewayMethods: [],
   tools: [],
   services: [],
   diagnostics: []
-};
-console.log(JSON.stringify(inspection));
+}));
 '@ `
         -Encoding utf8
     Set-Content `
@@ -148,7 +154,12 @@ console.log(JSON.stringify(inspection));
         ConvertFrom-Json
     if (
         $packagedManifest.id -ne 'gateway-isolation' -or
-        $packagedManifest.enabledByDefault -ne $true
+        $packagedManifest.enabledByDefault -ne $false -or
+        (
+            $packagedManifest.PSObject.Properties.Name -contains
+            'enabledByDefaultOnPlatforms' -and
+            @($packagedManifest.enabledByDefaultOnPlatforms).Count -ne 0
+        )
     ) {
         throw 'Packaged Gateway isolation plugin manifest changed during provisioning.'
     }

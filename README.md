@@ -127,9 +127,10 @@ Changing only the workflow-dispatch default does not change automatic builds.
 For a one-time override, run **Build OpenClaw Gateway MSIX** manually and
 provide a tag, branch, or preferably a full 40-character commit SHA in
 `openclaw_ref`. Payload composition validates that the selected OpenClaw
-runtime can discover and load the packaging-owned Windows Launcher plugin
-with its required read-only route shape; incompatible older refs fail instead
-of producing a package without status UI.
+runtime discovers the packaging-owned Windows Launcher plugin in its
+default-disabled state, then uses OpenClaw's non-activating runtime inspection
+pass to validate its required read-only route shape. Incompatible older refs
+fail instead of producing a package with an unvalidated plugin.
 
 The source build uses that revision's `.github/actions/setup-node-env` action
 to select Node.js and pnpm. Its resolved Node.js version is recorded in
@@ -165,13 +166,24 @@ dotnet test .\OpenClaw.Gateway.MSIX.slnx `
 ```
 
 `scripts\Build-Payload.ps1` npm-installs an OpenClaw package into an expanded,
-architecture-specific application tree and provisions the packaging-owned,
-enabled-by-default Windows Launcher plugin into OpenClaw's bundled plugin
-directory. Its internal package, path, and plugin ID remain
-`gateway-isolation`. The plugin adds a read-only **Windows Launcher** tab to the
+architecture-specific application tree and provisions the packaging-owned
+Windows Launcher plugin into OpenClaw's bundled plugin directory. Its internal
+package, path, and plugin ID remain `gateway-isolation`. The plugin is disabled
+by default, so normal installs do not activate it, register its route, or show
+the **Windows Launcher** tab. When explicitly enabled for validation or by the
+future launcher command implementation, it adds the read-only tab to the
 Control group and serves it through an authenticated, sandboxed plugin route.
 It reads only the launch-time `CLAWCTL_GATEWAY_ISOLATION` value and registers no
 mutation RPC or process control.
+
+The page preserves the planned `clawctl gateway-isolation enable|disable`
+command and Copy control for the paired launcher command update. This package
+does not register those `clawctl` commands yet, so the page explicitly tells
+users to run the command only after that support is installed.
+
+The screenshots attached to the pull request are design and behavior proof
+captured with the plugin explicitly enabled in an isolated validation profile;
+they do not represent the default-disabled state of a normal install.
 
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by

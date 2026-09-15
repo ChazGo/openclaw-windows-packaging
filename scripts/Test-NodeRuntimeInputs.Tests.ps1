@@ -30,11 +30,36 @@ try {
     $source = Join-Path $testRoot 'source'
     $package = Join-Path $testRoot 'package'
     $payload = Join-Path $testRoot 'payload'
-    New-Item -ItemType Directory -Path "$source\dist", $package -Force | Out-Null
+    New-Item `
+        -ItemType Directory `
+        -Path "$source\dist\extensions\fixture", $package `
+        -Force |
+        Out-Null
     '{"name":"openclaw","version":"0.0.0","type":"module"}' |
         Set-Content -LiteralPath "$source\package.json"
-    'console.log("fixture");' | Set-Content -LiteralPath "$source\openclaw.mjs"
+    @'
+const runtime = process.argv.includes("--runtime");
+console.log(JSON.stringify({
+  plugin: {
+    id: "gateway-isolation",
+    origin: "bundled",
+    enabled: false,
+    activated: runtime,
+    status: runtime ? "loaded" : "disabled",
+    imported: runtime,
+    httpRoutes: runtime ? 1 : 0
+  },
+  httpRouteCount: runtime ? 1 : 0,
+  gatewayMethods: [],
+  tools: [],
+  services: [],
+  diagnostics: []
+}));
+'@ | Set-Content -LiteralPath "$source\openclaw.mjs"
     'export {};' | Set-Content -LiteralPath "$source\dist\index.js"
+    '{"name":"@openclaw/fixture","version":"1.0.0"}' |
+        Set-Content `
+            -LiteralPath "$source\dist\extensions\fixture\package.json"
     & npm pack $source --ignore-scripts --offline --silent --pack-destination $package
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to pack the local Node.js input fixture.'

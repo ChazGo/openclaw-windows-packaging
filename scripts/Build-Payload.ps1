@@ -93,10 +93,15 @@ $pluginManifest = Get-Content `
     ConvertFrom-Json
 if (
     $pluginManifest.id -ne 'gateway-isolation' -or
-    $pluginManifest.enabledByDefault -ne $true -or
+    $pluginManifest.enabledByDefault -ne $false -or
+    (
+        $pluginManifest.PSObject.Properties.Name -contains
+        'enabledByDefaultOnPlatforms' -and
+        @($pluginManifest.enabledByDefaultOnPlatforms).Count -ne 0
+    ) -or
     $pluginManifest.activation.onStartup -ne $true
 ) {
-    throw 'Gateway isolation plugin manifest is not enabled for Gateway startup.'
+    throw 'Gateway isolation plugin manifest must be packaged but disabled by default.'
 }
 
 $bundledPluginsDirectory = Join-Path $installedPackage 'dist\extensions'
@@ -129,6 +134,34 @@ try {
     $env:CLAWCTL_GATEWAY_ISOLATION = 'disabled'
     Push-Location $installedPackage
     try {
+        $defaultInspectionOutput = (
+            & node `
+                .\openclaw.mjs `
+                plugins inspect gateway-isolation `
+                --json
+        ) | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw (
+                'The selected OpenClaw payload cannot inspect the packaged ' +
+                "Gateway isolation plugin. Exit code: $LASTEXITCODE."
+            )
+        }
+        $defaultInspection = $defaultInspectionOutput | ConvertFrom-Json
+        if (
+            $defaultInspection.plugin.id -ne 'gateway-isolation' -or
+            $defaultInspection.plugin.origin -ne 'bundled' -or
+            $defaultInspection.plugin.enabled -ne $false -or
+            $defaultInspection.plugin.activated -ne $false -or
+            $defaultInspection.plugin.imported -ne $false -or
+            $defaultInspection.plugin.httpRoutes -ne 0 -or
+            $defaultInspection.httpRouteCount -ne 0
+        ) {
+            throw (
+                'The packaged Gateway isolation plugin must remain disabled ' +
+                'and unregistered until it is explicitly enabled.'
+            )
+        }
+
         $inspectionOutput = (
             & node `
                 .\openclaw.mjs `
@@ -151,7 +184,7 @@ try {
     if (
         $inspection.plugin.id -ne 'gateway-isolation' -or
         $inspection.plugin.origin -ne 'bundled' -or
-        $inspection.plugin.enabled -ne $true -or
+        $inspection.plugin.enabled -ne $false -or
         $inspection.plugin.activated -ne $true -or
         $inspection.plugin.status -ne 'loaded' -or
         $inspection.plugin.imported -ne $true -or
@@ -163,8 +196,8 @@ try {
         @($inspection.diagnostics).Count -ne 0
     ) {
         throw (
-            'The selected OpenClaw payload did not load the Gateway isolation ' +
-            'plugin with the required read-only runtime shape.'
+            'The selected OpenClaw payload did not inspect the disabled Gateway ' +
+            'isolation plugin with the required read-only runtime shape.'
         )
     }
 }
