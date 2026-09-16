@@ -6,7 +6,7 @@ namespace OpenClaw.Launcher.Session;
 internal sealed class TeardownOrchestrator
 {
     private readonly ISessionLock _lock;
-    private readonly GatewayPersistenceManager _recovery;
+    private readonly IGatewayPersistence _recovery;
     private readonly GatewayController _gateway;
     private readonly SessionCoordinator _sessions;
     private readonly GatewayStateStore _gatewayState;
@@ -15,7 +15,7 @@ internal sealed class TeardownOrchestrator
 
     public TeardownOrchestrator(
         ISessionLock lifecycleLock,
-        GatewayPersistenceManager recovery,
+        IGatewayPersistence recovery,
         GatewayController gateway,
         SessionCoordinator sessions,
         GatewayStateStore gatewayState,

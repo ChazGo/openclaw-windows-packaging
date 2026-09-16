@@ -58,6 +58,18 @@ internal sealed record GatewayPersistenceRemovalResult(
     string Message,
     string? Detail = null);
 
+internal interface IGatewayPersistence
+{
+    Task<GatewayPersistenceStatus> GetStatusAsync(
+        CancellationToken cancellationToken);
+
+    Task<GatewayPersistenceInstallResult> InstallAsync(
+        CancellationToken cancellationToken);
+
+    Task<GatewayPersistenceRemovalResult> UninstallAsync(
+        CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Everything the persistence manager needs about this user and installation.
 /// </summary>

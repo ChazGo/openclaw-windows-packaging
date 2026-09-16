@@ -12,7 +12,7 @@ public sealed class DiagnosticsBundleTests : IDisposable
     [Fact]
     public async Task CollectionPreservesHostLogsAndRedactsEveryTextSource()
     {
-        (GatewayRuntime runtime, HostPaths paths) = CreateRuntime();
+        (GatewayRuntime runtime, HostPaths paths, _) = CreateRuntime();
         Directory.CreateDirectory(Path.GetDirectoryName(paths.LogPath)!);
         await File.WriteAllTextAsync(
             paths.LogPath,
@@ -37,7 +37,7 @@ public sealed class DiagnosticsBundleTests : IDisposable
     [Fact]
     public async Task CollectionReadsALiveLogWithWriteAndDeleteSharing()
     {
-        (GatewayRuntime runtime, HostPaths paths) = CreateRuntime();
+        (GatewayRuntime runtime, HostPaths paths, _) = CreateRuntime();
         Directory.CreateDirectory(Path.GetDirectoryName(paths.LogPath)!);
         using FileStream liveLog = new(
             paths.LogPath,
@@ -65,7 +65,7 @@ public sealed class DiagnosticsBundleTests : IDisposable
     [Fact]
     public async Task CorruptSessionStateStillProducesAHostOnlyBundle()
     {
-        (GatewayRuntime runtime, HostPaths paths) = CreateRuntime();
+        (GatewayRuntime runtime, HostPaths paths, _) = CreateRuntime();
         Directory.CreateDirectory(Path.GetDirectoryName(paths.LogPath)!);
         await File.WriteAllTextAsync(paths.LogPath, "host evidence");
         await File.WriteAllTextAsync(paths.SessionStatePath, "{not-json");
@@ -117,7 +117,7 @@ public sealed class DiagnosticsBundleTests : IDisposable
     [Fact]
     public async Task ExplicitExistingOutputNamesThePathAndOutputOption()
     {
-        (GatewayRuntime runtime, HostPaths paths) = CreateRuntime();
+        (GatewayRuntime runtime, HostPaths paths, _) = CreateRuntime();
         string bundlePath = Path.Combine(_root, "existing.zip");
         Directory.CreateDirectory(Path.GetDirectoryName(paths.LogPath)!);
         await File.WriteAllTextAsync(paths.LogPath, "host evidence");
@@ -130,13 +130,37 @@ public sealed class DiagnosticsBundleTests : IDisposable
         Assert.Contains("--output", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task NativeCollectionNeverReadsOrStartsTheRecordedSession()
+    {
+        (GatewayRuntime runtime, HostPaths paths, FakeMxcSessionClient backend) =
+            CreateRuntime();
+        Directory.CreateDirectory(Path.GetDirectoryName(paths.LogPath)!);
+        await File.WriteAllTextAsync(paths.LogPath, "host evidence");
+        await File.WriteAllTextAsync(paths.SessionStatePath, "{not-json");
+        string bundlePath = Path.Combine(_root, "native.zip");
+
+        DiagnosticsBundleResult result = await runtime.CollectLogsAsync(
+            bundlePath,
+            includeSession: false,
+            CancellationToken.None);
+
+        Assert.Equal(bundlePath, result.BundlePath);
+        Assert.False(result.SessionReached);
+        Assert.Empty(backend.Calls);
+        Assert.DoesNotContain(
+            result.Notes,
+            note => note.Contains("session", StringComparison.OrdinalIgnoreCase));
+    }
+
     public void Dispose()
     {
         Directory.Delete(_root, recursive: true);
         GC.SuppressFinalize(this);
     }
 
-    private (GatewayRuntime Runtime, HostPaths Paths) CreateRuntime()
+    private (GatewayRuntime Runtime, HostPaths Paths, FakeMxcSessionClient Backend)
+        CreateRuntime()
     {
         HostPaths paths = HostPaths.ForRoot(
             Path.Combine(_root, Guid.NewGuid().ToString("N"), "state"),
@@ -160,6 +184,6 @@ public sealed class DiagnosticsBundleTests : IDisposable
             paths,
             session,
             _ => { });
-        return (runtime, paths);
+        return (runtime, paths, backend);
     }
 }

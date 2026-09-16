@@ -25,6 +25,7 @@ internal interface IInstallationLifecycle
         SessionRuntime runtime,
         Action<string> log,
         bool lockAlreadyHeld,
+        bool force,
         CancellationToken cancellationToken);
 
     IInstallationStateCleaner CreateStateCleaner(SessionRuntime runtime);
@@ -82,26 +83,29 @@ internal sealed class InstallationLifecycle : IInstallationLifecycle
         SessionRuntime runtime,
         Action<string> log,
         bool lockAlreadyHeld,
+        bool force,
         CancellationToken cancellationToken) =>
-        RunTeardownAsync(options, runtime, log, lockAlreadyHeld, cancellationToken);
+        RunTeardownAsync(options, runtime, log, lockAlreadyHeld, force, cancellationToken);
 
     private static Task<TeardownResult> RunTeardownAsync(
         HostOptions options,
         SessionRuntime runtime,
         Action<string> log,
         bool lockAlreadyHeld,
+        bool force,
         CancellationToken cancellationToken)
     {
         TeardownOrchestrator teardown =
             GatewayRuntime.CreateTeardownOrchestrator(options, runtime, log);
         return lockAlreadyHeld
-            ? teardown.RunUnderLockAsync(runtime.HelperPath, force: true, cancellationToken)
-            : teardown.RunAsync(runtime.HelperPath, force: true, cancellationToken);
+            ? teardown.RunUnderLockAsync(runtime.HelperPath, force, cancellationToken)
+            : teardown.RunAsync(runtime.HelperPath, force, cancellationToken);
     }
 
     public IInstallationStateCleaner CreateStateCleaner(SessionRuntime runtime) =>
         new InstallationStateCleaner(
-            [runtime.Paths.StateRoot, HostDataPaths.GetProductLocalStateRoot()]);
+            runtime.Paths,
+            HostDataPaths.GetProductLocalStateRoot());
 
     public Task<GatewayPersistenceInstallResult> InstallRecoveryAsync(
         Action<string> log,

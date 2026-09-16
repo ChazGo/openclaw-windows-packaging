@@ -57,18 +57,19 @@ the read-only application directory the workspace.
 
 ### `clawctl`
 
-`clawctl` owns setup and the isolated-session operations:
+`clawctl` owns setup and routes management operations through the persisted
+gateway-isolation selection:
 
 | Command | Behavior |
 |---|---|
-| `clawctl setup` | On a session-capable Windows build, confirm packaged `app\openclaw.mjs` exists, provision or reuse the owned isolated session, and install the bundled Node.js runtime in the agent profile. It does not prepare the invoking user's host runtime. It also configures gateway sign-in recovery without starting a gateway. |
-| `clawctl setup --no-isolation` | After the isolated-session support check, prepare the invoking user's host runtime without provisioning the isolated session. |
-| `clawctl setup --fresh [--force]` | Remove this installation's owned session and package-local state, then run setup again. Explicit `--no-isolation` or `OPENCLAW_SESSION=0` rejects fresh setup before mutation; a persisted Disabled selection is reserved for later mode-aware execution policy. Without `--force`, incomplete external cleanup stops before local state is erased. `--force` is valid only with `--fresh`; it cannot bypass the isolation rejection. |
-| `clawctl status` | Report the recorded isolated-session state without provisioning or replacing it. It asks the backend to start the recorded provision as its status probe, so it is not a passive diagnostic. Use `clawctl gateway-service status` to inspect the gateway. |
-| `clawctl teardown [--force]` | Stop and deprovision the owned session and remove its setup state. The MSIX remains installed. |
-| `clawctl pwsh` | Open an interactive PowerShell session inside the agent session. |
-| `clawctl collect-logs [--output <path>]` | Create a redacted host-and-agent diagnostics ZIP. |
-| `clawctl gateway-service start` | Start the OpenClaw gateway in the isolated session. Requires setup. |
+| `clawctl setup` | Repair the persisted mode. With no saved selection, provision the isolated session and record Enabled only after setup and recovery succeed. |
+| `clawctl setup --no-isolation` | With no saved selection, prepare the signed-in-user runtime without changing MXC and record Disabled only after setup and recovery succeed. It repairs an existing Disabled setup, but rejects an existing Enabled selection. |
+| `clawctl setup --fresh [--force]` | Reset resources owned by the persisted mode, then repair that mode without changing the selection. A persisted Disabled mode resets its native resources. Explicit `--no-isolation` or `OPENCLAW_SESSION=0` rejects `--fresh` before mutation, and `--force` cannot bypass that rejection. |
+| `clawctl status` | Report the selected mode plus its session/Gateway or signed-in-user runtime/Gateway state without provisioning or replacing resources. The isolated status probe may start the already-recorded provision. |
+| `clawctl teardown --force` | Remove resources owned by the selected mode while retaining the installed package and mode selection. |
+| `clawctl pwsh` | Enabled opens an interactive PowerShell session inside the agent session. Disabled fails with guidance to use ordinary PowerShell. |
+| `clawctl collect-logs [--output <path>]` | Enabled includes reachable guest diagnostics. Disabled includes signed-in-user Gateway/profile diagnostics and never attaches to a session. |
+| `clawctl gateway-service start` | Start the OpenClaw gateway in the selected isolated or signed-in-user runtime. Requires setup. |
 | `clawctl gateway-service status` | Inspect the gateway without starting it. |
 | `clawctl gateway-service stop` | Stop the gateway while retaining the session and its data. |
 | `clawctl --version` | Print the packaged launcher version. |
@@ -79,6 +80,10 @@ and completion come from
 [System.CommandLine](https://learn.microsoft.com/en-us/dotnet/standard/commandline/).
 Invalid management input is rejected with exit code `1` and a parse diagnostic
 on standard error; no readiness check runs.
+
+Changing an installed Enabled/Disabled selection requires the confirmed
+`clawctl gateway-isolation` transition command introduced by Layer 4; Layer 3
+only routes the existing commands.
 
 Help and version requests take precedence over the rest of the command line.
 `clawctl --version bogus` prints the launcher version and exits `0` rather than
@@ -118,8 +123,9 @@ contains `mode`, `ownerSid`, and `updatedUtc`. A missing record defaults to
 required isolation; malformed, unsupported, or foreign-owner state stops the
 launch rather than routing directly. Unpackaged development launches remain
 direct by default and may use `OPENCLAW_SESSION`; installed launches do not
-allow that development override to contradict persisted state. This layer does
-not yet expose `clawctl` commands to change the selection.
+allow that development override to contradict persisted state. The existing command surface now obeys this selection consistently. The
+`clawctl gateway-isolation enable|disable|status` transition command is not
+introduced until Layer 4.
 
 For initial installed setup, plain `clawctl setup` selects Enabled and
 `clawctl setup --no-isolation` selects Disabled. The selection is written only

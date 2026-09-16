@@ -97,9 +97,10 @@ public sealed class ProgramTests : IDisposable
         var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
         var persisted = new List<GatewayIsolationMode>();
         using var output = new StringWriter();
+        HostOptions hostOptions = CreateSetupOptions(applicationDirectory);
 
         int exitCode = await Program.RunControlAsync(
-            CreateSetupOptions(applicationDirectory),
+            hostOptions,
             ["setup", "--no-isolation"],
             _ => { },
             output,
@@ -110,7 +111,16 @@ public sealed class ProgramTests : IDisposable
                 PersistAfterSuccess: true,
                 GatewayIsolationSetupIntentSource.NoIsolationOption,
                 "Initial direct setup."),
-            persistGatewayIsolation: persisted.Add);
+            persistGatewayIsolation: persisted.Add,
+            runNativeSetup: async (_, complete, _) =>
+            {
+                _ = lifecycle.PrepareHostRuntime(hostOptions, _ => { });
+                complete?.Invoke();
+                await output.WriteLineAsync(
+                    "OpenClaw setup completed without isolated-session provisioning.")
+                    .ConfigureAwait(false);
+                return 0;
+            });
 
         Assert.Equal(0, exitCode);
         Assert.Equal(["lock", "host"], lifecycle.Calls);
@@ -131,9 +141,10 @@ public sealed class ProgramTests : IDisposable
         };
         var persisted = new List<GatewayIsolationMode>();
         using var output = new StringWriter();
+        HostOptions hostOptions = CreateSetupOptions(applicationDirectory);
 
         int exitCode = await Program.RunControlAsync(
-            CreateSetupOptions(applicationDirectory),
+            hostOptions,
             ["setup", "--no-isolation"],
             _ => { },
             output,
@@ -144,7 +155,13 @@ public sealed class ProgramTests : IDisposable
                 PersistAfterSuccess: true,
                 GatewayIsolationSetupIntentSource.NoIsolationOption,
                 "Initial direct setup."),
-            persistGatewayIsolation: persisted.Add);
+            persistGatewayIsolation: persisted.Add,
+            runNativeSetup: (_, complete, _) =>
+            {
+                _ = lifecycle.PrepareHostRuntime(hostOptions, _ => { });
+                complete?.Invoke();
+                return Task.FromResult(0);
+            });
 
         Assert.Equal(1, exitCode);
         Assert.Equal(["lock", "host"], lifecycle.Calls);
@@ -175,37 +192,6 @@ public sealed class ProgramTests : IDisposable
 
         Assert.Equal(0, exitCode);
         Assert.Equal([GatewayIsolationMode.Enabled], persisted);
-    }
-
-    [Fact]
-    public async Task DisabledFreshSetupFailsInsteadOfIgnoringFresh()
-    {
-        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
-        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
-        var persisted = new List<GatewayIsolationMode>();
-        using var output = new StringWriter();
-
-        int exitCode = await Program.RunControlAsync(
-            CreateSetupOptions(applicationDirectory),
-            ["setup", "--no-isolation", "--fresh"],
-            _ => { },
-            output,
-            TextWriter.Null,
-            installationLifecycle: lifecycle,
-            resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
-                GatewayIsolationMode.Disabled,
-                PersistAfterSuccess: true,
-                GatewayIsolationSetupIntentSource.NoIsolationOption,
-                "Initial direct setup."),
-            persistGatewayIsolation: persisted.Add);
-
-        Assert.Equal(1, exitCode);
-        Assert.Empty(lifecycle.Calls);
-        Assert.Empty(persisted);
-        Assert.Contains(
-            "--fresh requires isolated-session provisioning",
-            output.ToString(),
-            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -335,32 +321,36 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task PersistedDisabledFreshSetupRemainsADeferredExecutionPolicy()
+    public async Task PersistedDisabledPlainFreshSetupResetsTheNativeMode()
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
         var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
-        using var output = new StringWriter();
+        HostOptions hostOptions = CreateSetupOptions(applicationDirectory);
 
         int exitCode = await Program.RunControlAsync(
-            CreateSetupOptions(applicationDirectory),
+            hostOptions,
             ["setup", "--fresh"],
             _ => { },
-            output,
+            TextWriter.Null,
             TextWriter.Null,
             installationLifecycle: lifecycle,
             resolveGatewayIsolationSetup: _ => new GatewayIsolationSetupPlan(
                 GatewayIsolationMode.Disabled,
                 PersistAfterSuccess: false,
                 GatewayIsolationSetupIntentSource.PersistedSelection,
-                "Setup preserves the persisted disabled selection."));
+                "Setup preserves the persisted disabled selection."),
+            runNativeSetup: (setup, complete, cancellationToken) =>
+            {
+                Assert.True(setup.Fresh);
+                Assert.Null(complete);
+                lifecycle.Calls.Add("native-reset");
+                _ = lifecycle.PrepareHostRuntime(hostOptions, _ => { });
+                return Task.FromResult(0);
+            });
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(0, exitCode);
         Assert.True(lifecycle.SupportChecked);
-        Assert.Empty(lifecycle.Calls);
-        Assert.Contains(
-            "mode-aware execution policy from a later layer",
-            output.ToString(),
-            StringComparison.Ordinal);
+        Assert.Equal(["lock", "native-reset", "host"], lifecycle.Calls);
     }
 
     [Fact]
@@ -1007,8 +997,15 @@ public sealed class ProgramTests : IDisposable
             SessionRuntime sessionRuntime,
             Action<string> log,
             bool lockAlreadyHeld,
+            bool force,
             CancellationToken cancellationToken) =>
-            Inner.TeardownAsync(options, sessionRuntime, log, lockAlreadyHeld, cancellationToken);
+            Inner.TeardownAsync(
+                options,
+                sessionRuntime,
+                log,
+                lockAlreadyHeld,
+                force,
+                cancellationToken);
 
         public IInstallationStateCleaner CreateStateCleaner(SessionRuntime sessionRuntime) =>
             Inner.CreateStateCleaner(sessionRuntime);
@@ -1149,6 +1146,7 @@ public sealed class ProgramTests : IDisposable
             SessionRuntime runtime,
             Action<string> log,
             bool lockAlreadyHeld,
+            bool force,
             CancellationToken cancellationToken)
         {
             Calls.Add("recovery");

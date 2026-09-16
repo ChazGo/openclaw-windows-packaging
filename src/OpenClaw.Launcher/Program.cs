@@ -260,69 +260,106 @@ internal static class Program
         Session.IInstallationLifecycle? installationLifecycle = null,
         Func<string, string?>? readEnvironmentVariable = null,
         Func<SetupOptions, GatewayIsolationSetupPlan>? resolveGatewayIsolationSetup = null,
-        Action<GatewayIsolationMode>? persistGatewayIsolation = null)
+        Action<GatewayIsolationMode>? persistGatewayIsolation = null,
+        Func<GatewayIsolationSelection>? resolveGatewayIsolation = null,
+        Func<GatewayCommandTarget>? createIsolatedTarget = null,
+        Func<GatewayCommandTarget>? createNativeTarget = null,
+        HostPaths? hostPaths = null,
+        Func<SetupOptions, Action?, CancellationToken, Task<int>>? runNativeSetup = null)
     {
         _ = resolveNode;
         Session.IInstallationLifecycle lifecycle =
             installationLifecycle ?? Session.InstallationLifecycle.Production;
+        HostPaths paths = hostPaths ?? HostPaths.Create();
+        Func<string, string?> environment =
+            readEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        GatewayIsolationSelection ResolveIsolation() =>
+            resolveGatewayIsolation is not null
+                ? resolveGatewayIsolation()
+                : (installationLifecycle is not null || resolveNode is not null) &&
+                    paths.PackageFamilyName is null
+                    ? new GatewayIsolationSelection(
+                        GatewayIsolationMode.Enabled,
+                        "Gateway isolation is enabled for the injected installation lifecycle.")
+                    : GatewayIsolationPolicy.Resolve(
+                        new GatewayIsolationStateStore(paths.GatewayIsolationStatePath),
+                        paths.PackageFamilyName is not null,
+                        GatewayIsolationPolicy.GetCurrentUserSid(),
+                        environment);
         Session.SessionRuntime? sessionRuntime = null;
         Session.SessionRuntime GetSessionRuntime() =>
             sessionRuntime ??= lifecycle.CreateRuntime(log);
 
-        RootCommand command = ClawCtlCommandLine.Create(
-            new ClawCtlHandlers
+        GatewayCommandTarget CreateIsolatedTarget()
+        {
+            if (createIsolatedTarget is not null)
+            {
+                return createIsolatedTarget();
+            }
+
+            return new GatewayCommandTarget
             {
                 Setup = (setupOptions, cancellationToken) => RunSetupAsync(
                     setupOptions,
                     options,
                     GetSessionRuntime,
                     lifecycle,
+                    paths,
                     log,
                     output,
                     readEnvironmentVariable ?? Environment.GetEnvironmentVariable,
                     resolveGatewayIsolationSetup,
                     persistGatewayIsolation,
+                    runNativeSetup,
                     cancellationToken),
                 Status = async cancellationToken =>
                 {
-                    Session.SessionStatus status = await GetSessionRuntime()
+                    Session.SessionRuntime runtime = GetSessionRuntime();
+                    Session.SessionStatus status = await runtime
                         .Coordinator.ProbeRecordedStatusAsync(cancellationToken)
                         .ConfigureAwait(false);
                     await output.WriteLineAsync(DescribeSessionStatus(status))
                         .ConfigureAwait(false);
+                    Gateway.GatewayRuntime gatewayRuntime = Gateway.GatewayRuntime.Create(
+                        options,
+                        paths,
+                        runtime,
+                        log);
+                    Gateway.GatewayStatusReport gateway = await gatewayRuntime.Controller
+                        .GetStatusAsync(runtime.HelperPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    await Gateway.GatewayControlOutput.WriteStatusAsync(
+                        output,
+                        gateway,
+                        gatewayRuntime.Paths,
+                        cancellationToken).ConfigureAwait(false);
+
                     return status.Availability is Session.SessionAvailability.Stale or
                         Session.SessionAvailability.BackendUnavailable or
                         Session.SessionAvailability.BackendError or
-                        Session.SessionAvailability.Unusable
+                        Session.SessionAvailability.Unusable ||
+                        gateway.State is not Gateway.GatewayState.Running and
+                            not Gateway.GatewayState.NotStarted
                         ? 1
                         : 0;
                 },
                 CollectLogs = async (requestedPath, cancellationToken) =>
                 {
-                    HostPaths paths = HostPaths.Create();
+                    Session.SessionRuntime runtime = GetSessionRuntime();
                     Gateway.DiagnosticsBundleResult result =
                         await Gateway.GatewayRuntime.Create(
                             options,
                             paths,
-                            GetSessionRuntime(),
+                            runtime,
                             log)
-                        .CollectLogsAsync(requestedPath, cancellationToken)
+                        .CollectLogsAsync(
+                            requestedPath,
+                            includeSession: true,
+                            cancellationToken)
                         .ConfigureAwait(false);
-                    if (result.BundlePath is not null)
-                    {
-                        await output.WriteLineAsync(
-                            $"Diagnostics bundle created: {result.BundlePath}").ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await output.WriteLineAsync(
-                            "No diagnostic files were available to bundle.").ConfigureAwait(false);
-                    }
-
-                    foreach (string warning in result.Notes)
-                    {
-                        await output.WriteLineAsync($"Warning: {warning}").ConfigureAwait(false);
-                    }
+                    await Gateway.NativeInstallationRuntime.WriteDiagnosticsResultAsync(
+                        result,
+                        output).ConfigureAwait(false);
                     return 0;
                 },
                 Teardown = async (force, cancellationToken) =>
@@ -337,7 +374,12 @@ internal static class Program
 
                     Session.SessionRuntime runtime = GetSessionRuntime();
                     Session.TeardownResult result = await lifecycle.TeardownAsync(
-                        options, runtime, log, lockAlreadyHeld: false, cancellationToken)
+                        options,
+                        runtime,
+                        log,
+                        lockAlreadyHeld: false,
+                        force: true,
+                        cancellationToken)
                         .ConfigureAwait(false);
                     await output.WriteLineAsync(result.Message).ConfigureAwait(false);
                     if (!string.IsNullOrWhiteSpace(result.Detail))
@@ -352,39 +394,133 @@ internal static class Program
                     GetSessionRuntime(),
                     output,
                     cancellationToken),
-                GatewayStart = async cancellationToken =>
+                Gateway = new Gateway.LazyGatewayLifecycle(() =>
                 {
-                    Gateway.GatewayStartResult result = await Gateway.GatewayRuntime
-                        .Create(options, log)
-                        .Controller
-                        .StartAsync(GetSessionRuntime().HelperPath, cancellationToken)
-                        .ConfigureAwait(false);
-                    await output.WriteLineAsync(result.Message).ConfigureAwait(false);
-                    return result.State == Gateway.GatewayState.Running ? 0 : 1;
-                },
+                    Session.SessionRuntime runtime = GetSessionRuntime();
+                    return new Gateway.SessionGatewayLifecycle(
+                        Gateway.GatewayRuntime.Create(
+                            options,
+                            paths,
+                            runtime,
+                            log).Controller,
+                        runtime.HelperPath);
+                }),
                 GatewayStatus = async cancellationToken =>
                 {
-                    Gateway.GatewayRuntime runtime = Gateway.GatewayRuntime.Create(options, log);
-                    Gateway.GatewayStatusReport result = await runtime.Controller
-                        .GetStatusAsync(GetSessionRuntime().HelperPath, cancellationToken)
+                    Session.SessionRuntime runtime = GetSessionRuntime();
+                    Gateway.GatewayRuntime gatewayRuntime = Gateway.GatewayRuntime.Create(
+                        options,
+                        paths,
+                        runtime,
+                        log);
+                    Gateway.GatewayStatusReport result = await gatewayRuntime.Controller
+                        .GetStatusAsync(runtime.HelperPath, cancellationToken)
                         .ConfigureAwait(false);
                     await Gateway.GatewayControlOutput.WriteStatusAsync(
-                        output, result, runtime.Paths, cancellationToken).ConfigureAwait(false);
-                    return result.State is Gateway.GatewayState.Running or Gateway.GatewayState.NotStarted
-                        ? 0 : 1;
+                        output,
+                        result,
+                        gatewayRuntime.Paths,
+                        cancellationToken).ConfigureAwait(false);
+                    return result.State is Gateway.GatewayState.Running or
+                        Gateway.GatewayState.NotStarted
+                        ? 0
+                        : 1;
                 },
                 GatewayStop = async cancellationToken =>
                 {
+                    Session.SessionRuntime runtime = GetSessionRuntime();
                     Gateway.GatewayStopResult result = await Gateway.GatewayRuntime
-                        .Create(options, log)
+                        .Create(options, paths, runtime, log)
                         .Controller
-                        .StopAsync(GetSessionRuntime().HelperPath, cancellationToken)
+                        .StopAsync(runtime.HelperPath, cancellationToken)
                         .ConfigureAwait(false);
                     await Gateway.GatewayControlOutput.WriteStopAsync(output, result)
                         .ConfigureAwait(false);
                     return result.Succeeded ? 0 : 1;
                 }
-            });
+            };
+        }
+
+        GatewayCommandTarget CreateNativeTarget()
+        {
+            if (createNativeTarget is not null)
+            {
+                return createNativeTarget();
+            }
+
+            Session.ISessionLock lifecycleLock = GetSessionRuntime().LifecycleLock;
+            NodeRuntime? preparedRuntime = null;
+            Gateway.NativeGatewayController gateway =
+                Gateway.GatewayRuntime.CreateNativeLifecycle(
+                    options,
+                    paths,
+                    lifecycleLock,
+                    () => preparedRuntime ??
+                        NodeRuntimeResolver.Resolve(GetPackagedNodeArchivePath(options)),
+                    log);
+            var native = new Gateway.NativeInstallationRuntime(
+                options,
+                paths,
+                gateway,
+                lifecycleLock,
+                Gateway.GatewayRuntime.CreateRecoveryManager(paths, log),
+                Gateway.GatewayRuntime.CreateDiagnostics(paths),
+                lifecycle,
+                runtime => preparedRuntime = runtime,
+                log);
+            return new GatewayCommandTarget
+            {
+                Setup = (setupOptions, cancellationToken) =>
+                    native.SetupAsync(
+                        setupOptions,
+                        output,
+                        lockAlreadyHeld: false,
+                        completeIsolationSelection: null,
+                        cancellationToken),
+                Status = cancellationToken =>
+                    native.GetStatusAsync(output, cancellationToken),
+                CollectLogs = (requestedPath, cancellationToken) =>
+                    native.CollectLogsAsync(requestedPath, output, cancellationToken),
+                Teardown = async (force, cancellationToken) =>
+                {
+                    if (!force)
+                    {
+                        await error.WriteLineAsync(
+                            "Teardown removes signed-in-user gateway state and runtime data. Re-run with --force to continue.")
+                            .ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    return await native.TeardownAsync(
+                        output,
+                        lockAlreadyHeld: false,
+                        cancellationToken).ConfigureAwait(false);
+                },
+                PowerShell = _ => throw new Session.SessionException(
+                    "Gateway isolation is disabled. Open ordinary PowerShell to run commands as the signed-in user."),
+                Gateway = native.Gateway
+            };
+        }
+
+        var router = new Gateway.ModeAwareCommandRouter(
+            ResolveIsolation,
+            (setupOptions, cancellationToken) => RunSetupAsync(
+                setupOptions,
+                options,
+                GetSessionRuntime,
+                lifecycle,
+                paths,
+                log,
+                output,
+                environment,
+                resolveGatewayIsolationSetup,
+                persistGatewayIsolation,
+                runNativeSetup,
+                cancellationToken),
+            CreateIsolatedTarget,
+            CreateNativeTarget,
+            output);
+        RootCommand command = ClawCtlCommandLine.Create(router.CreateHandlers());
 
         InvocationConfiguration configuration = new()
         {
@@ -413,11 +549,13 @@ internal static class Program
         HostOptions options,
         Func<Session.SessionRuntime> getSessionRuntime,
         Session.IInstallationLifecycle lifecycle,
+        HostPaths paths,
         Action<string> log,
         TextWriter output,
         Func<string, string?> readEnvironmentVariable,
         Func<SetupOptions, GatewayIsolationSetupPlan>? resolveGatewayIsolationSetup,
         Action<GatewayIsolationMode>? persistGatewayIsolation,
+        Func<SetupOptions, Action?, CancellationToken, Task<int>>? runNativeSetup,
         CancellationToken cancellationToken)
     {
         string applicationDirectory = GetPackagedApplicationDirectory(options);
@@ -445,8 +583,6 @@ internal static class Program
                 .ConfigureAwait(false);
             return 1;
         }
-
-        HostPaths paths = HostPaths.Create();
         string ownerSid = GatewayIsolationPolicy.GetCurrentUserSid();
         GatewayIsolationStateStore? isolationStore = paths.PackageFamilyName is null
             ? null
@@ -481,55 +617,60 @@ internal static class Program
                 }));
         log(isolationPlan.Reason);
 
-        if (isolationPlan.Mode == GatewayIsolationMode.Disabled)
-        {
-            if (setupOptions.Fresh)
-            {
-                await output.WriteLineAsync(
-                    "OpenClaw setup --fresh with a persisted Disabled selection " +
-                    "requires the mode-aware execution policy from a later layer.")
-                    .ConfigureAwait(false);
-                return 1;
-            }
-
-            try
-            {
-                Session.SessionRuntime runtime = getSessionRuntime();
-                using Session.ISessionLockHandle handle =
-                    lifecycle.AcquireLifecycleLock(runtime);
-                NodeRuntime nodeRuntime = lifecycle.PrepareHostRuntime(options, log);
-                ClawCtlConsole.WriteNodeRuntimeSummary(output, nodeRuntime);
-                if (isolationPlan.PersistAfterSuccess)
-                {
-                    persistIsolation(GatewayIsolationMode.Disabled);
-                }
-
-                await output.WriteLineAsync(
-                    "OpenClaw setup completed without isolated-session provisioning.")
-                    .ConfigureAwait(false);
-                return 0;
-            }
-            catch (Exception exception) when (
-                exception is Session.SessionException or GatewayIsolationException or
-                IOException or UnauthorizedAccessException)
-            {
-                log($"Direct OpenClaw setup could not complete: {exception.Message}");
-                await output.WriteLineAsync(
-                    $"OpenClaw setup could not complete: {exception.Message}")
-                    .ConfigureAwait(false);
-                return 1;
-            }
-        }
-
         try
         {
             Session.SessionRuntime runtime = getSessionRuntime();
-            if (setupOptions.Fresh)
+            if (isolationPlan.Mode == GatewayIsolationMode.Enabled && setupOptions.Fresh)
             {
                 // Resolve every required package input before removing state.
                 _ = lifecycle.ValidatePackageRuntime(options, runtime);
+            }
 
-                using Session.ISessionLockHandle handle = lifecycle.AcquireLifecycleLock(runtime);
+            using Session.ISessionLockHandle handle =
+                lifecycle.AcquireLifecycleLock(runtime);
+            Action? completeIsolationSelection = isolationPlan.PersistAfterSuccess
+                ? () => persistIsolation(isolationPlan.Mode)
+                : null;
+            if (isolationPlan.Mode == GatewayIsolationMode.Disabled)
+            {
+                if (runNativeSetup is not null)
+                {
+                    return await runNativeSetup(
+                        setupOptions,
+                        completeIsolationSelection,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                NodeRuntime? preparedRuntime = null;
+                Gateway.NativeGatewayController gateway =
+                    Gateway.GatewayRuntime.CreateNativeLifecycle(
+                        options,
+                        paths,
+                        runtime.LifecycleLock,
+                        () => preparedRuntime
+                            ?? throw new Session.SessionException(
+                                "The signed-in-user Node.js runtime has not been prepared."),
+                        log);
+                var native = new Gateway.NativeInstallationRuntime(
+                    options,
+                    paths,
+                    gateway,
+                    runtime.LifecycleLock,
+                    Gateway.GatewayRuntime.CreateRecoveryManager(paths, log),
+                    Gateway.GatewayRuntime.CreateDiagnostics(paths),
+                    lifecycle,
+                    value => preparedRuntime = value,
+                    log);
+                return await native.SetupAsync(
+                    setupOptions,
+                    output,
+                    lockAlreadyHeld: true,
+                    completeIsolationSelection,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (setupOptions.Fresh)
+            {
                 string reportPath = WriteFreshDiagnosticReport(runtime, log);
                 await output.WriteLineAsync($"Pre-reset diagnostic report: {reportPath}")
                     .ConfigureAwait(false);
@@ -537,7 +678,12 @@ internal static class Program
                 try
                 {
                     teardownResult = await lifecycle.TeardownAsync(
-                        options, runtime, log, lockAlreadyHeld: true, cancellationToken)
+                        options,
+                        runtime,
+                        log,
+                        lockAlreadyHeld: true,
+                        force: setupOptions.Force,
+                        cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception exception) when (
@@ -595,9 +741,7 @@ internal static class Program
                     log,
                     lockAlreadyHeld: true,
                     cancellationToken,
-                    isolationPlan.PersistAfterSuccess
-                        ? () => persistIsolation(GatewayIsolationMode.Enabled)
-                        : null)
+                    completeIsolationSelection)
                     .ConfigureAwait(false);
             }
 
@@ -607,17 +751,15 @@ internal static class Program
                 lifecycle,
                 output,
                 log,
-                lockAlreadyHeld: false,
+                lockAlreadyHeld: true,
                 cancellationToken,
-                isolationPlan.PersistAfterSuccess
-                    ? () => persistIsolation(GatewayIsolationMode.Enabled)
-                    : null)
+                completeIsolationSelection)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (
             exception is Session.SessionException or GatewayIsolationException)
         {
-            log($"Isolated session setup is unavailable: {exception.Message}");
+            log($"OpenClaw setup is unavailable: {exception.Message}");
             await output.WriteLineAsync($"OpenClaw setup could not complete: {exception.Message}")
                 .ConfigureAwait(false);
             return 1;

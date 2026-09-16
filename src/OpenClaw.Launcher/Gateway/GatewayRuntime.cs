@@ -8,14 +8,14 @@ namespace OpenClaw.Launcher.Gateway;
 internal sealed partial class GatewayRuntime
 {
     private readonly HostPaths _paths;
-    private readonly SessionRuntime _session;
+    private readonly SessionRuntime? _session;
     private readonly TimeProvider _clock;
 
     private GatewayRuntime(
         GatewayController controller,
         string helperPath,
         HostPaths paths,
-        SessionRuntime session,
+        SessionRuntime? session,
         TimeProvider clock)
     {
         Controller = controller;
@@ -31,15 +31,22 @@ internal sealed partial class GatewayRuntime
 
     internal HostPaths Paths => _paths;
 
-    private SessionRuntime Session => _session;
+    private SessionRuntime Session =>
+        _session ?? throw new InvalidOperationException(
+            "This diagnostics runtime has no isolated-session client.");
 
     private static bool FileExists(string path) => File.Exists(path);
 
     public static GatewayPersistenceManager CreateRecoveryManager(Action<string> log)
+        => CreateRecoveryManager(HostPaths.Create(), log);
+
+    internal static GatewayPersistenceManager CreateRecoveryManager(
+        HostPaths paths,
+        Action<string> log)
     {
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(log);
 
-        HostPaths paths = HostPaths.Create();
         string packageFamilyName = paths.PackageFamilyName
             ?? throw new SessionException(
                 "OpenClaw is not running from its installed package, so it cannot configure gateway recovery.");
@@ -69,16 +76,38 @@ internal sealed partial class GatewayRuntime
         NodeRuntime hostRuntime,
         Action<string> log)
     {
-        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(hostRuntime);
-        ArgumentNullException.ThrowIfNull(log);
-
         HostPaths paths = HostPaths.Create();
         string packageFamilyName = paths.PackageFamilyName
             ?? throw new SessionException(
                 "OpenClaw is not running from its installed package, so it " +
                 "cannot own a signed-in-user gateway.");
-        string applicationId = PackageIdentity.ToApplicationId(packageFamilyName);
+        return CreateNativeLifecycle(
+            options,
+            paths,
+            new NamedSessionLock(
+                PackageIdentity.ToApplicationId(packageFamilyName) + "_Installation"),
+            () => hostRuntime,
+            log);
+    }
+
+    internal static NativeGatewayController CreateNativeLifecycle(
+        HostOptions options,
+        HostPaths paths,
+        ISessionLock lifecycleLock,
+        Func<NodeRuntime> getHostRuntime,
+        Action<string> log)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(lifecycleLock);
+        ArgumentNullException.ThrowIfNull(getHostRuntime);
+        ArgumentNullException.ThrowIfNull(log);
+
+        string packageFamilyName = paths.PackageFamilyName
+            ?? throw new SessionException(
+                "OpenClaw is not running from its installed package, so it " +
+                "cannot own a signed-in-user gateway.");
         string CurrentGeneration() =>
             PackageIdentity.TryGetPackageFullName()
             ?? throw new SessionException(
@@ -86,6 +115,7 @@ internal sealed partial class GatewayRuntime
 
         NativeGatewayLaunchRequest CreateRequest()
         {
+            NodeRuntime hostRuntime = getHostRuntime();
             string applicationDirectory = options.PackagedApplicationDirectory
                 ?? throw new SessionException(
                     "The packaged OpenClaw application was not found.");
@@ -119,8 +149,21 @@ internal sealed partial class GatewayRuntime
             new LoopbackGatewayHealthProbe(),
             CreateRequest,
             CurrentGeneration,
-            new NamedSessionLock(applicationId + "_Installation"),
+            lifecycleLock,
             log);
+    }
+
+    internal static GatewayRuntime CreateDiagnostics(
+        HostPaths paths,
+        TimeProvider? clock = null)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return new GatewayRuntime(
+            controller: null!,
+            helperPath: string.Empty,
+            paths,
+            session: null,
+            clock ?? TimeProvider.System);
     }
 
     public static GatewayRuntime Create(
