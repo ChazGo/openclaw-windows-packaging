@@ -295,7 +295,7 @@ public sealed class ProgramTests : IDisposable
 
         int exitCode = await Program.RunControlAsync(
             new HostOptions(null, null, []),
-            ["teardown"],
+            ["teardown", "--force"],
             _ => { },
             TextWriter.Null,
             TextWriter.Null,
