@@ -104,6 +104,40 @@ public sealed class SessionRuntimeInstallerTests : IDisposable
         Assert.Equal("24.20.0", File.ReadAllText(result.ExecutablePath!));
     }
 
+    [Fact]
+    public void InstallPersistsTheDirectoryContainingNode()
+    {
+        string archivePath = CreateArchive("24.20.0");
+        File.WriteAllText(
+            RequestPath,
+            SessionRuntimeProtocol.SerializeRequest(new SessionRuntimeInstallRequest
+            {
+                RequestId = "r1",
+                ArchivePath = archivePath
+            }));
+        string? persistedDirectory = null;
+
+        int exitCode = SessionRuntimeInstaller.Run(
+            RequestPath,
+            File.ReadAllText,
+            File.WriteAllText,
+            () => _root,
+            directory =>
+            {
+                persistedDirectory = directory;
+                return true;
+            });
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(
+            Path.Combine(
+                _root,
+                "OpenClawGatewayMSIX",
+                "agent-node",
+                "node-v24.20.0-win-x64"),
+            persistedDirectory);
+    }
+
     // A truncated or corrupt archive is a real packaging failure. Left
     // unhandled it crashes the guest, and the host then reports a lost request
     // rather than the reason.
