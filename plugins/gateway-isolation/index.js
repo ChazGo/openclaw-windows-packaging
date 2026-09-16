@@ -77,7 +77,7 @@ export function renderGatewayIsolationPage(mode) {
     :root {
       color-scheme: light dark;
       --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      --font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Liberation Mono", monospace;
       --radius: 10px;
       --radius-full: 9999px;
       --bg: #ffffff;
@@ -284,7 +284,7 @@ function renderGatewayIsolationUnavailablePage() {
     :root {
       color-scheme: light dark;
       --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      --font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Liberation Mono", monospace;
       --radius: 10px;
       --radius-full: 9999px;
       --bg: #ffffff;

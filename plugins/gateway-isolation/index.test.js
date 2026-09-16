@@ -140,6 +140,10 @@ for (const expected of [
     assert.match(html, /Copy the selected command manually\./);
     assert.match(html, /copied = document\.execCommand\("copy"\)/);
     assert.match(html, /openclaw:widget-theme/);
+    assert.match(
+      html,
+      /--font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Liberation Mono", monospace;/,
+    );
     assert.doesNotMatch(html, /next manual Gateway restart/i);
   });
 }
@@ -265,6 +269,10 @@ for (const initial of ["enabled", "disabled", undefined, "", "invalid", "ENABLED
     assert.equal(first.statusCode, initial === "enabled" || initial === "disabled" ? 200 : 503);
     if (initial === "enabled") assert.match(first.body, />Enabled</);
     if (initial === "disabled") assert.match(first.body, />Disabled</);
+    assert.match(
+      first.body,
+      /--font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Liberation Mono", monospace;/,
+    );
     for (value of ["enabled", "disabled", "invalid", undefined]) {
       assert.deepEqual(invokeRoute(routes[0]), first);
     }
