@@ -50,6 +50,30 @@ downloading one with `gh`. MSIX composition requires Visual Studio Build Tools
 with the Desktop development with C++ workload and the Windows SDK. Build x64
 and ARM64 separately.
 
+For the development inner loop, register a Developer Mode layout instead of
+building an MSIX:
+
+```powershell
+.\scripts\Deploy-LocalPackage.ps1
+```
+
+`Deploy-LocalPackage.ps1` publishes the NativeAOT launcher, assembles a layout
+under `artifacts\local-package`, registers it with `Add-AppxPackage -Register`,
+and runs `clawctl setup`. It never builds, signs, or installs an MSIX, and it
+requires no changes to the packaging scripts or project files. It is idempotent
+and skips work when nothing changed, so keep its up-to-date check honest: the
+fingerprint hashes the launcher rather than trusting timestamps, because
+publish can refresh timestamps with no source change.
+
+Loose registration and MSIX installation are mutually exclusive for one package
+identity, and Windows cannot preserve packaged app data across that switch, so
+the script refuses by default and requires `-ReplaceExistingInstall`. The
+registered package reads its files from the repository, so treat
+`artifacts\local-package` and the checkout as live inputs, not scratch output.
+Its scenario tests inject every GitHub, publish, certificate-free registration,
+and deployment operation; no test may register, remove, or modify a real
+package.
+
 ## Architecture
 
 - `OpenClaw.Gateway.Launcher` is a .NET 10 NativeAOT executable packaged as
@@ -77,12 +101,18 @@ and ARM64 separately.
   `%LOCALAPPDATA%\OpenClawGatewayMSIX` outside an MSIX context) with a named
   mutex so concurrent processes append complete records.
 - The GitHub workflow first builds and packs a pinned `openclaw/openclaw`
-  revision on Linux using that revision's `setup-node-env` action. The resolved
-  Node.js version flows through `source.json` and `payload-metadata.json`;
-  Windows payload builds use the same version. `Build-MSIX.ps1` downloads its
-  matching official archive, rejects Node.js from the application payload,
-  builds the application inventory, publishes the NativeAOT host, validates
-  package contents, and emits MSIX metadata including the runtime hash.
+  revision on Linux using that revision's `setup-node-env` action. Non-official
+  runs cache that tarball by resolved upstream commit and verify its recorded
+  commit and SHA-256 on every use. They also cache each architecture's Windows
+  dependency tree by commit, Node.js version, and payload script hash while
+  rerunning all payload validation; official signing bypasses both caches. The
+  resolved Node.js version flows through `source.json` and `payload-metadata.json`;
+  each architecture-specific Windows job uses that same version to build the
+  expanded payload, validates the installed Gateway and Control UI build identities,
+  and immediately composes its MSIX. `Build-MSIX.ps1` downloads the matching
+  official archive, rejects Node.js from the application payload, builds the
+  application inventory, publishes the NativeAOT host, validates package contents,
+  and emits MSIX metadata including the runtime hash.
 - Unsigned artifacts are the normal PR/push output. Test signing uses a
   temporary runner-local certificate. Official signing is gated to `main` and
   the immutable upstream commit in `release-policy.json`; signing inputs are

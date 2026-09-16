@@ -59,6 +59,8 @@ try {
 
     New-Item `
         -Path (
+            Join-Path $packageSource 'dist\control-ui\assets'
+        ), (
             Join-Path $packageSource 'dist\extensions\fixture'
         ), $packageDirectory `
         -ItemType Directory `
@@ -116,6 +118,24 @@ console.log(JSON.stringify({
   diagnostics: []
 }));
 '@ `
+        -Encoding utf8
+    Set-Content `
+        -LiteralPath (Join-Path $packageSource 'dist\index.js') `
+        -Value 'export {};' `
+        -Encoding utf8
+    Set-Content `
+        -LiteralPath (Join-Path $packageSource 'dist\build-info.json') `
+        -Value '{"buildId":"fixture-build"}' `
+        -Encoding utf8
+    Set-Content `
+        -LiteralPath (Join-Path $packageSource 'dist\control-ui\sw.js') `
+        -Value 'const EMBEDDED_CACHE_VERSION = "fixture-build";' `
+        -Encoding utf8
+    Set-Content `
+        -LiteralPath (
+            Join-Path $packageSource 'dist\control-ui\assets\app.js'
+        ) `
+        -Value 'const buildId = "fixture-build";' `
         -Encoding utf8
     Set-Content `
         -LiteralPath (
@@ -176,6 +196,12 @@ console.log(JSON.stringify({
     }
     if (Test-Path -LiteralPath (Join-Path $packagedPlugin 'index.test.js')) {
         throw 'Plugin test sources must not be shipped in the MSIX payload.'
+    }
+    $stagedPlugin = Join-Path `
+        $testRoot `
+        'openclaw-stage-arm64\node_modules\openclaw\dist\extensions\gateway-isolation'
+    if (Test-Path -LiteralPath $stagedPlugin) {
+        throw 'Plugin provisioning must not mutate the reusable staged install.'
     }
 
     $packagedManifest = Get-Content `

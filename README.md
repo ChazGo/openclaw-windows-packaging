@@ -142,6 +142,14 @@ the launcher derives its runtime version and LocalState path from the bundled
 archive name. There is no separate packaging-side Node.js version pin or
 runtime-support policy.
 
+Non-official workflows cache the packed OpenClaw tarball by its resolved
+upstream commit. They also cache each architecture's Windows dependency tree by
+the resolved commit, tarball SHA-256, Node.js version, and payload-build script.
+A tarball cache hit still verifies the recorded commit and SHA-256; a
+dependency-tree hit still runs every payload validation and smoke test.
+Official-signing workflows bypass
+both caches and always rebuild upstream source and Windows dependencies.
+
 The payload artifact records the requested ref and resolved upstream commit in
 `payload-metadata.json`. That build-only file is not embedded in the MSIX.
 `msix-metadata.json` records both the packaging repository commit and bundled
@@ -168,15 +176,17 @@ dotnet test .\OpenClaw.Gateway.MSIX.slnx `
 ```
 
 `scripts\Build-Payload.ps1` npm-installs an OpenClaw package into an expanded,
-architecture-specific application tree and provisions the packaging-owned
-Windows Launcher plugin into OpenClaw's bundled plugin directory. Its internal
-package, path, and plugin ID remain `gateway-isolation`. The plugin is disabled
-by default, so normal installs do not activate it, register its route, or show
-the **Windows Launcher** tab. When explicitly enabled for validation or by the
-future launcher command implementation, it adds the read-only tab to the
-Control group and serves it through an authenticated, sandboxed plugin route.
-It reads only the launch-time `CLAWCTL_GATEWAY_ISOLATION` value and registers no
-mutation RPC or process control.
+architecture-specific application tree. It validates the Gateway and Control UI
+build identities on the installed tree, including reused staged installs, then
+provisions the packaging-owned Windows Launcher plugin into the payload copy's
+bundled plugin directory. Its internal package, path, and plugin ID remain
+`gateway-isolation`. The plugin is disabled by default, so normal installs do
+not activate it, register its route, or show the **Windows Launcher** tab. When
+explicitly enabled for validation or by the future launcher command
+implementation, it adds the read-only tab to the Control group and serves it
+through an authenticated, sandboxed plugin route. It reads only the launch-time
+`CLAWCTL_GATEWAY_ISOLATION` value and registers no mutation RPC or process
+control.
 
 The page preserves the planned `clawctl gateway-isolation enable|disable`
 command and Copy control for the paired launcher command update. This package
@@ -206,6 +216,63 @@ per-file inventory, and then creates an unsigned NativeAOT MSIX.
 `scripts\Build-LocalMSIX.ps1` can reuse a successful workflow payload or a
 local payload directory. `-NodeArchivePath` can supply an already-downloaded
 archive, but its version and architecture must match the payload metadata.
+
+### Running a local development build
+
+To go from a clean checkout to a registered, runnable package:
+
+```powershell
+.\scripts\Deploy-LocalPackage.ps1
+```
+
+This is the development inner loop. It does not build, sign, or install an
+MSIX. It acquires the payload and the bundled Node.js runtime, publishes the
+NativeAOT launcher, assembles a Developer Mode layout under
+`artifacts\local-package`, registers it with `Add-AppxPackage -Register`, and
+runs `clawctl setup` so `openclaw` is immediately usable.
+
+The command is idempotent: re-running with nothing changed reports that the
+package is already up to date and does nothing, and re-running after a source
+or payload change rebuilds only what changed. The expanded application is
+linked into the layout rather than copied, so repeat runs neither re-download
+nor duplicate hundreds of megabytes.
+
+| Option | Behavior |
+| --- | --- |
+| `-RefreshPayload` | Download the payload again; the previous one is kept until the new one registers successfully |
+| `-PayloadRunId <id>` | Use a specific successful workflow run, reusing a matching cached payload |
+| `-PayloadDirectory <path>` | Read a prepared payload directly, with no GitHub access and no modification; pass it on every run |
+| `-Architecture x64` / `arm64` | Select the architecture; it must be runnable on this device |
+| `-ReplaceExistingInstall` | Remove a conflicting MSIX-installed package first (see below) |
+| `-SkipSetup` | Register without extracting the Node.js runtime |
+| `-Force` | Re-register even when nothing changed |
+| `-Unregister` | Remove the local registration, preserving app data and caches |
+
+**Requires Developer Mode**, which the script checks before doing any work.
+
+**It cannot coexist with an MSIX-installed `OpenClaw.Gateway`.** Windows
+refuses to replace a packaged install with a local layout, and it cannot
+preserve that package's app data across the switch, so the script stops and
+explains rather than removing anything implicitly. Pass
+`-ReplaceExistingInstall` to accept that trade.
+
+**Run `-Unregister` before installing a released package.** Windows will not
+replace a loose registration with a packaged install: `Add-AppxPackage` fails
+with `0x80073CFB`, reporting that an unpackaged version is already installed
+and a packaged version cannot replace it. This is the same mutual exclusion as
+above, in the other direction, and it applies regardless of version. Unregister
+first, then install the release:
+
+```powershell
+.\scripts\Deploy-LocalPackage.ps1 -Unregister
+Add-AppxPackage -Path .\OpenClawGateway-0.0.0.0-x64.msix
+```
+
+**The registered package reads its files from the repository.** Deleting
+`artifacts\local-package`, moving the checkout, or deleting the worktree breaks
+the registration until the command runs again; `-Unregister` first if you plan
+to remove the checkout. Local builds are unsigned development artifacts and are
+never official-signing inputs.
 
 Normal pull-request and push workflows publish unsigned packages for
 validation. Manual runs support three signing modes:

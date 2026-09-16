@@ -11,6 +11,29 @@ $workflowPath = Join-Path `
 $workflow = Get-Content -LiteralPath $workflowPath -Raw
 
 $requiredFragments = @(
+    'group: gateway-msix-${{ github.event.pull_request.number || github.run_id }}'
+    "cancel-in-progress: `${{ github.event_name == 'pull_request' }}"
+    'name: Classify pull request changes'
+    '.\scripts\Get-PackagingRelevance.ps1'
+    'name: Test packaging relevance'
+    "if: `${{ github.event_name != 'pull_request' || needs.changes.outputs.packaging == 'true' }}"
+    'name: Gateway MSIX CI'
+    "if: `${{ always() }}"
+    "contains(needs.*.result, 'failure')"
+    "contains(needs.*.result, 'cancelled')"
+    'name: Upload payload'
+    "retention-days: `${{ github.event_name == 'pull_request' && 1 || 7 }}"
+    'name: Restore cached OpenClaw package'
+    "if: `${{ github.event_name != 'workflow_dispatch' || inputs.signing_mode != 'official' }}"
+    'uses: actions/cache/restore@v4'
+    'name: Save OpenClaw package cache'
+    "steps.package-cache.outputs.cache-hit != 'true' && (github.event_name != 'workflow_dispatch' || inputs.signing_mode != 'official')"
+    'uses: actions/cache/save@v4'
+    'name: Restore cached Windows dependency tree'
+    'path: ${{ runner.temp }}\openclaw-stage-${{ matrix.architecture }}'
+    'key: ${{ steps.payload-key.outputs.key }}'
+    'name: Save Windows dependency tree cache'
+    "steps.payload-cache.outputs.cache-hit != 'true' && (github.event_name != 'workflow_dispatch' || inputs.signing_mode != 'official')"
     'environment: release-signing'
     'id-token: write'
     'uses: azure/login@v3'
@@ -42,6 +65,50 @@ foreach ($fragment in $requiredFragments) {
     if (-not $workflow.Contains($fragment, [StringComparison]::Ordinal)) {
         throw "Signing workflow is missing required configuration: $fragment"
     }
+}
+
+$buildMsixJobMatch = [regex]::Match(
+    $workflow,
+    '(?ms)^  build-msix:\s*(?<job>.*?)(?=^  [a-z][a-z0-9-]+:)'
+)
+if (-not $buildMsixJobMatch.Success) {
+    throw 'Unable to locate the build-msix workflow job.'
+}
+$buildMsixJob = $buildMsixJobMatch.Groups['job'].Value
+if ($buildMsixJob.Contains(
+        'name: Download payload',
+        [StringComparison]::Ordinal)) {
+    throw 'The build-msix job must compose the locally built payload directly.'
+}
+
+$dispatchDefaultMatch = [regex]::Match(
+    $workflow,
+    '(?ms)openclaw_ref:\s+description:.*?default:\s*(?<sha>[0-9a-f]{40})'
+)
+$automaticFallbackMatch = [regex]::Match(
+    $workflow,
+    "OPENCLAW_REF:.*?\|\|\s*'(?<sha>[0-9a-f]{40})'"
+)
+if (-not $dispatchDefaultMatch.Success -or -not $automaticFallbackMatch.Success) {
+    throw 'Unable to locate both pinned OpenClaw workflow revisions.'
+}
+
+$releasePolicy = Get-Content `
+    -LiteralPath (Join-Path $repositoryRoot 'release-policy.json') `
+    -Raw |
+    ConvertFrom-Json
+$pinnedRevisions = @(
+    @(
+        $dispatchDefaultMatch.Groups['sha'].Value
+        $automaticFallbackMatch.Groups['sha'].Value
+        [string]$releasePolicy.approvedCommit
+    ) | Select-Object -Unique
+)
+if ($pinnedRevisions.Count -ne 1) {
+    throw (
+        'The workflow defaults and official release policy must pin the same ' +
+        "OpenClaw commit; found: $($pinnedRevisions -join ', ')."
+    )
 }
 
 if ($workflow.Contains('AZURE_CLIENT_SECRET', [StringComparison]::Ordinal)) {
