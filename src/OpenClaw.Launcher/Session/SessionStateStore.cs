@@ -207,9 +207,10 @@ internal sealed class SessionStateStore
                 $"installation is '{expectedApplicationId}'.");
         }
 
+        MxcSandboxId sandboxId;
         try
         {
-            _ = MxcSandboxId.Parse(record.SandboxId);
+            sandboxId = MxcSandboxId.Parse(record.SandboxId);
         }
         catch (MxcException exception)
         {
@@ -217,6 +218,22 @@ internal sealed class SessionStateStore
                 SessionStateFault.Incomplete,
                 $"The session record does not contain a usable sandbox identifier: " +
                 $"{exception.Message}");
+        }
+
+        // The record naming this installation does not establish that the
+        // identity inside it does. This file is writable by the signed-in user,
+        // so a substituted sandbox id would otherwise be replayed to the
+        // backend on the caller's authority.
+        if (sandboxId.TryGetOwningApplicationId(out string? owningApplicationId) &&
+            !string.Equals(
+                owningApplicationId,
+                expectedApplicationId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return SessionStateResult.Failed(
+                SessionStateFault.ForeignIdentity,
+                $"The recorded sandbox was issued to '{owningApplicationId}', but " +
+                $"this installation is '{expectedApplicationId}'.");
         }
 
         return SessionStateResult.Found(record);
