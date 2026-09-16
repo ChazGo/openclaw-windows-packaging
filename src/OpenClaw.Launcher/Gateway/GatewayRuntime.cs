@@ -28,6 +28,8 @@ internal sealed partial class GatewayRuntime
 
     public string HelperPath { get; }
 
+    internal HostPaths Paths => _paths;
+
     private SessionRuntime Session => _session;
 
     private static bool FileExists(string path) => File.Exists(path);
