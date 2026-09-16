@@ -117,7 +117,7 @@ internal sealed partial class GatewayRuntime
         Action<string> log)
     {
         var configuration = new GatewayConfigurationStore(paths.GatewayConfigurationPath);
-        async Task<GatewayStartRequest> CreateRequestAsync(CancellationToken cancellationToken)
+        Task<GatewayStartRequest> CreateRequestAsync(CancellationToken cancellationToken)
         {
             string applicationDirectory = options.PackagedApplicationDirectory
                 ?? throw new SessionException(
@@ -133,11 +133,17 @@ internal sealed partial class GatewayRuntime
             Version packagedVersion = NodeRuntimeInstaller.GetArchiveVersion(
                 archivePath,
                 System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
-            return new GatewayStartRequest(
+            SessionRecord sessionRecord = session.RequireSetup();
+            return Task.FromResult(new GatewayStartRequest(
                 session.HelperPath,
                 session.RequireAgentNodePath(packagedVersion),
                 applicationDirectory,
-                launch.Port);
+                launch.Port)
+            {
+                WorkingDirectory = launch.WorkingDirectory ?? sessionRecord.WorkspacePath
+                    ?? throw new SessionException(
+                        "The isolated session has no shared workspace for the gateway.")
+            });
         }
 
         return new GatewayController(
