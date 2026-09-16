@@ -261,7 +261,8 @@ internal sealed class NativeGatewayController : IGatewayLifecycle
     }
 
     internal async Task<GatewayStopResult> StopUnderLockAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool clearRecord = true)
     {
         NativeGatewayStateResult state = _store.Read();
         if (state.Record is null)
@@ -297,11 +298,15 @@ internal sealed class NativeGatewayController : IGatewayLifecycle
 
         if (!inspection.ProcessIdentityMatches)
         {
-            _store.Clear();
+            if (clearRecord)
+            {
+                _store.Clear();
+            }
             return new GatewayStopResult(
                 Stopped: false,
-                "The recorded signed-in-user gateway was no longer running, so its " +
-                "record was removed.");
+                clearRecord
+                    ? "The recorded signed-in-user gateway was no longer running, so its record was removed."
+                    : "The recorded signed-in-user gateway was no longer running; its record was retained for rollback.");
         }
 
         NativeGatewayProcessSnapshot stopped = await _process
@@ -317,7 +322,10 @@ internal sealed class NativeGatewayController : IGatewayLifecycle
                 Succeeded: false);
         }
 
-        _store.Clear();
+        if (clearRecord)
+        {
+            _store.Clear();
+        }
         return new GatewayStopResult(
             Stopped: true,
             "The signed-in-user gateway is stopped.");

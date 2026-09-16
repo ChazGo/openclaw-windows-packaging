@@ -13,6 +13,8 @@ internal sealed class NativeInstallationRuntime
     private readonly IInstallationLifecycle _installationLifecycle;
     private readonly Action<NodeRuntime> _runtimePrepared;
     private readonly Action<string> _deleteRuntimeDirectory;
+    private readonly string? _runtimeRoot;
+    private TrustedPath.FileIdentity? _runtimeRootIdentity;
     private readonly Action<string> _log;
 
     public NativeInstallationRuntime(
@@ -44,7 +46,18 @@ internal sealed class NativeInstallationRuntime
         _diagnostics = diagnostics;
         _installationLifecycle = installationLifecycle;
         _runtimePrepared = runtimePrepared;
-        _deleteRuntimeDirectory = deleteRuntimeDirectory ?? DeleteRuntimeDirectory;
+        if (deleteRuntimeDirectory is null)
+        {
+            _runtimeRoot = Path.Combine(
+                HostDataPaths.GetProductLocalStateRoot(),
+                "NodeJS");
+            _runtimeRootIdentity = TrustedPath.TryGetDirectoryIdentity(_runtimeRoot);
+            _deleteRuntimeDirectory = DeleteRuntimeDirectory;
+        }
+        else
+        {
+            _deleteRuntimeDirectory = deleteRuntimeDirectory;
+        }
         _log = log;
     }
 
@@ -58,9 +71,24 @@ internal sealed class NativeInstallationRuntime
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(output);
+        using ISessionLockHandle? handle = lockAlreadyHeld ? null : AcquireLock();
+        return await SetupUnderLockAsync(
+            setupOptions,
+            output,
+            cancellationToken,
+            completeIsolationSelection)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<int> SetupUnderLockAsync(
+        SetupOptions setupOptions,
+        TextWriter output,
+        CancellationToken cancellationToken,
+        Action? completeIsolationSelection = null)
+    {
+        ArgumentNullException.ThrowIfNull(output);
         string applicationDirectory = RequireApplicationDirectory();
         _ = RequireNodeArchive();
-        using ISessionLockHandle? handle = lockAlreadyHeld ? null : AcquireLock();
 
         if (setupOptions.Fresh)
         {
@@ -79,6 +107,12 @@ internal sealed class NativeInstallationRuntime
 
         NodeRuntime runtime = _installationLifecycle.PrepareHostRuntime(_options, _log);
         _runtimePrepared(runtime);
+        if (_runtimeRoot is not null)
+        {
+            _runtimeRootIdentity = TrustedPath.TryGetDirectoryIdentity(_runtimeRoot)
+                ?? throw new IOException(
+                    "The signed-in-user runtime root could not be verified after installation.");
+        }
         GatewayPersistenceInstallResult recovery = await _recovery
             .InstallAsync(cancellationToken).ConfigureAwait(false);
         await output.WriteLineAsync(
@@ -95,14 +129,33 @@ internal sealed class NativeInstallationRuntime
             return 1;
         }
 
-        completeIsolationSelection?.Invoke();
         await output.WriteLineAsync(
             $"OpenClaw is ready to run directly from {applicationDirectory}.")
             .ConfigureAwait(false);
+        completeIsolationSelection?.Invoke();
         return 0;
     }
 
     public async Task<int> GetStatusAsync(
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        int readiness = await GetReadinessAsync(output, cancellationToken)
+            .ConfigureAwait(false);
+        bool healthy = readiness == 0;
+        GatewayLifecycleStatus gateway = await _gateway
+            .GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        await output.WriteLineAsync(gateway.Message).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(gateway.Detail))
+        {
+            await output.WriteLineAsync(gateway.Detail).ConfigureAwait(false);
+        }
+        healthy &= gateway.State is GatewayState.Running or GatewayState.NotStarted;
+        return healthy ? 0 : 1;
+    }
+
+    internal async Task<int> GetReadinessAsync(
         TextWriter output,
         CancellationToken cancellationToken)
     {
@@ -124,15 +177,6 @@ internal sealed class NativeInstallationRuntime
                 $"Signed-in-user runtime is not ready: {exception.Message}")
                 .ConfigureAwait(false);
         }
-
-        GatewayLifecycleStatus gateway = await _gateway
-            .GetStatusAsync(cancellationToken).ConfigureAwait(false);
-        await output.WriteLineAsync(gateway.Message).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(gateway.Detail))
-        {
-            await output.WriteLineAsync(gateway.Detail).ConfigureAwait(false);
-        }
-        healthy &= gateway.State is GatewayState.Running or GatewayState.NotStarted;
 
         GatewayPersistenceStatus recovery = await _recovery
             .GetStatusAsync(cancellationToken).ConfigureAwait(false);
@@ -177,14 +221,18 @@ internal sealed class NativeInstallationRuntime
         return result.Succeeded ? 0 : 1;
     }
 
-    private async Task<TeardownResult> TeardownUnderLockAsync(
-        CancellationToken cancellationToken)
+    internal async Task<TeardownResult> TeardownUnderLockAsync(
+        CancellationToken cancellationToken,
+        bool removeRecovery = true)
     {
-        GatewayPersistenceRemovalResult recovery = await _recovery
-            .UninstallAsync(cancellationToken).ConfigureAwait(false);
-        if (!recovery.Succeeded)
+        if (removeRecovery)
         {
-            return new TeardownResult(false, recovery.Message, recovery.Detail);
+            GatewayPersistenceRemovalResult recovery = await _recovery
+                .UninstallAsync(cancellationToken).ConfigureAwait(false);
+            if (!recovery.Succeeded)
+            {
+                return new TeardownResult(false, recovery.Message, recovery.Detail);
+            }
         }
 
         GatewayStopResult gateway = await _gateway
@@ -242,11 +290,58 @@ internal sealed class NativeInstallationRuntime
         _lifecycleLock.TryAcquire(SessionCoordinator.DefaultLockTimeout)
         ?? throw new SessionBusyException(SessionCoordinator.DefaultLockTimeout);
 
-    private static void DeleteRuntimeDirectory(string path)
+    private void DeleteRuntimeDirectory(string path)
     {
-        if (Directory.Exists(path))
+        if (_runtimeRoot is null ||
+            _runtimeRootIdentity is null)
         {
-            Directory.Delete(path, recursive: true);
+            if (!Directory.Exists(path))
+            {
+                return;
+            }
+
+            throw new IOException(
+                "The signed-in-user runtime root has no verified ownership identity.");
+        }
+
+        DeleteRuntimeDirectory(path, _runtimeRoot, _runtimeRootIdentity.Value);
+    }
+
+    internal static void DeleteRuntimeDirectory(
+        string path,
+        string recordedRoot,
+        TrustedPath.FileIdentity recordedIdentity)
+    {
+        if (!Path.GetFullPath(path).Equals(
+                Path.GetFullPath(recordedRoot),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The signed-in-user runtime cleanup path is not the recorded runtime root.");
+        }
+
+        TrustedPath.EnsureNoReparsePoints(recordedRoot, recordedRoot);
+        using TrustedPath.ValidatedDirectory? root =
+            TrustedPath.TryOpenValidatedDirectory(recordedRoot, recordedIdentity);
+        if (root is null)
+        {
+            if (!Directory.Exists(recordedRoot))
+            {
+                return;
+            }
+
+            throw new IOException(
+                "The signed-in-user runtime root changed identity or could not be opened safely.");
+        }
+
+        foreach (string entry in Directory.EnumerateFileSystemEntries(recordedRoot))
+        {
+            if (!TrustedPath.TryDeleteOwnedEntry(root, entry) &&
+                (File.Exists(entry) || Directory.Exists(entry)))
+            {
+                throw new IOException(
+                    $"The signed-in-user runtime entry could not be removed safely: {entry}");
+            }
         }
     }
 

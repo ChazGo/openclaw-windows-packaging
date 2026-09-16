@@ -265,6 +265,9 @@ internal static class Program
         Func<GatewayCommandTarget>? createIsolatedTarget = null,
         Func<GatewayCommandTarget>? createNativeTarget = null,
         HostPaths? hostPaths = null,
+        TextReader? input = null,
+        Func<bool>? canReadInteractiveInput = null,
+        GatewayIsolationCommandHandlers? gatewayIsolationHandlers = null,
         Func<SetupOptions, Action?, CancellationToken, Task<int>>? runNativeSetup = null)
     {
         _ = resolveNode;
@@ -273,6 +276,9 @@ internal static class Program
         HostPaths paths = hostPaths ?? HostPaths.Create();
         Func<string, string?> environment =
             readEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        bool isIsolationCommand =
+            args.Count > 0 &&
+            string.Equals(args[0], "gateway-isolation", StringComparison.Ordinal);
         GatewayIsolationSelection ResolveIsolation() =>
             resolveGatewayIsolation is not null
                 ? resolveGatewayIsolation()
@@ -287,8 +293,11 @@ internal static class Program
                         GatewayIsolationPolicy.GetCurrentUserSid(),
                         environment);
         Session.SessionRuntime? sessionRuntime = null;
+        Gateway.GatewayPersistenceManager? recoveryManager = null;
         Session.SessionRuntime GetSessionRuntime() =>
             sessionRuntime ??= lifecycle.CreateRuntime(log);
+        Gateway.GatewayPersistenceManager GetRecoveryManager() =>
+            recoveryManager ??= Gateway.GatewayRuntime.CreateRecoveryManager(paths, log);
 
         GatewayCommandTarget CreateIsolatedTarget()
         {
@@ -463,7 +472,7 @@ internal static class Program
                 paths,
                 gateway,
                 lifecycleLock,
-                Gateway.GatewayRuntime.CreateRecoveryManager(paths, log),
+                GetRecoveryManager(),
                 Gateway.GatewayRuntime.CreateDiagnostics(paths),
                 lifecycle,
                 runtime => preparedRuntime = runtime,
@@ -502,6 +511,166 @@ internal static class Program
             };
         }
 
+        GatewayIsolationCommandHandlers CreateGatewayIsolationHandlers()
+        {
+            if (gatewayIsolationHandlers is not null)
+            {
+                return gatewayIsolationHandlers;
+            }
+
+            Session.SessionRuntime runtime = GetSessionRuntime();
+            Gateway.GatewayRuntime isolatedRuntime = Gateway.GatewayRuntime.Create(
+                options,
+                paths,
+                runtime,
+                log);
+            NodeRuntime? preparedRuntime = null;
+            Gateway.NativeGatewayController nativeGateway =
+                Gateway.GatewayRuntime.CreateNativeLifecycle(
+                    options,
+                    paths,
+                    runtime.LifecycleLock,
+                    () => preparedRuntime ??
+                        NodeRuntimeResolver.Resolve(GetPackagedNodeArchivePath(options)),
+                    log);
+            var nativeRuntime = new Gateway.NativeInstallationRuntime(
+                options,
+                paths,
+                nativeGateway,
+                runtime.LifecycleLock,
+                GetRecoveryManager(),
+                Gateway.GatewayRuntime.CreateDiagnostics(paths),
+                lifecycle,
+                runtimeValue => preparedRuntime = runtimeValue,
+                log);
+            Session.TeardownOrchestrator isolatedTeardown =
+                Gateway.GatewayRuntime.CreateTeardownOrchestrator(
+                    options,
+                    paths,
+                    runtime,
+                    GetRecoveryManager(),
+                    log);
+
+            var isolated = new GatewayIsolationTransitionTarget
+            {
+                GetReadinessAsync = async cancellationToken =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Session.SessionStatus status =
+                        runtime.Coordinator.GetRecordedStatus();
+                    await output.WriteLineAsync(DescribeSessionStatus(status))
+                        .ConfigureAwait(false);
+                    bool ready = status.Availability is
+                        Session.SessionAvailability.Recorded or
+                        Session.SessionAvailability.Running;
+                    return ready ? 0 : 1;
+                },
+                PrepareUnderLockAsync = cancellationToken =>
+                {
+                    _ = lifecycle.ValidatePackageRuntime(options, runtime);
+                    return RunSetupCoreAsync(
+                        runtime,
+                        options,
+                        lifecycle,
+                        output,
+                        log,
+                        lockAlreadyHeld: true,
+                        cancellationToken);
+                },
+                WriteGatewayStatusAsync = async (writer, cancellationToken) =>
+                {
+                    Gateway.GatewayStatusReport report = await isolatedRuntime.Controller
+                        .GetStatusAsync(runtime.HelperPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    await Gateway.GatewayControlOutput.WriteStatusAsync(
+                        writer,
+                        report,
+                        isolatedRuntime.Paths,
+                        cancellationToken).ConfigureAwait(false);
+                    return new Gateway.GatewayLifecycleStatus(
+                        report.State,
+                        report.Message,
+                        report.Detail);
+                },
+                StartGatewayUnderLockAsync = async cancellationToken =>
+                {
+                    Gateway.GatewayStartResult result = await isolatedRuntime.Controller
+                        .StartUnderLockAsync(runtime.HelperPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    return new Gateway.GatewayLifecycleStartResult(
+                        result.State,
+                        result.AlreadyRunning,
+                        result.Message);
+                },
+                StopGatewayUnderLockAsync = cancellationToken =>
+                    isolatedRuntime.Controller.StopUnderLockAsync(
+                        runtime.HelperPath,
+                        cancellationToken,
+                        clearRecord: false,
+                        allowUnconfirmedLaunch: false,
+                        allowUnavailableInspection: false),
+                TeardownUnderLockAsync = cancellationToken =>
+                    isolatedTeardown.RunUnderLockAsync(
+                        runtime.HelperPath,
+                        force: false,
+                        cancellationToken: cancellationToken,
+                        removeRecovery: false),
+                EnsureRecoveryUnderLockAsync = async cancellationToken =>
+                    (await GetRecoveryManager()
+                        .InstallAsync(cancellationToken).ConfigureAwait(false))
+                    .State == Gateway.GatewayPersistenceState.Ready
+            };
+            var native = new GatewayIsolationTransitionTarget
+            {
+                GetReadinessAsync = async cancellationToken =>
+                {
+                    int result = await nativeRuntime
+                        .GetReadinessAsync(output, cancellationToken)
+                        .ConfigureAwait(false);
+                    return result;
+                },
+                PrepareUnderLockAsync = cancellationToken =>
+                    nativeRuntime.SetupUnderLockAsync(
+                        new SetupOptions(
+                            Fresh: false,
+                            Force: false,
+                            NoIsolation: true),
+                        output,
+                        cancellationToken),
+                WriteGatewayStatusAsync = async (writer, cancellationToken) =>
+                {
+                    Gateway.GatewayLifecycleStatus status = await nativeGateway
+                        .GetStatusAsync(cancellationToken).ConfigureAwait(false);
+                    await Gateway.GatewayControlOutput
+                        .WriteStatusAsync(writer, status).ConfigureAwait(false);
+                    return status;
+                },
+                StartGatewayUnderLockAsync = nativeGateway.StartUnderLockAsync,
+                StopGatewayUnderLockAsync = cancellationToken =>
+                    nativeGateway.StopUnderLockAsync(
+                        cancellationToken,
+                        clearRecord: false),
+                TeardownUnderLockAsync = cancellationToken =>
+                    nativeRuntime.TeardownUnderLockAsync(
+                        cancellationToken,
+                        removeRecovery: false),
+                EnsureRecoveryUnderLockAsync = async cancellationToken =>
+                    (await GetRecoveryManager()
+                        .InstallAsync(cancellationToken).ConfigureAwait(false))
+                    .State == Gateway.GatewayPersistenceState.Ready
+            };
+            var transitions = new GatewayIsolationTransitionManager(
+                new GatewayIsolationStateStore(paths.GatewayIsolationStatePath),
+                GatewayIsolationPolicy.GetCurrentUserSid(),
+                runtime.LifecycleLock,
+                isolated,
+                native,
+                input ?? Console.In,
+                output,
+                canReadInteractiveInput ?? (() => !Console.IsInputRedirected));
+            return transitions.CreateHandlers();
+        }
+
         var router = new Gateway.ModeAwareCommandRouter(
             ResolveIsolation,
             (setupOptions, cancellationToken) => RunSetupAsync(
@@ -520,7 +689,18 @@ internal static class Program
             CreateIsolatedTarget,
             CreateNativeTarget,
             output);
-        RootCommand command = ClawCtlCommandLine.Create(router.CreateHandlers());
+        GatewayIsolationCommandHandlers? transitionHandlers = null;
+        GatewayIsolationCommandHandlers GetTransitionHandlers() =>
+            transitionHandlers ??= CreateGatewayIsolationHandlers();
+        GatewayIsolationCommandHandlers? lazyTransitionHandlers =
+            isIsolationCommand
+                ? new GatewayIsolationCommandHandlers(
+                    token => GetTransitionHandlers().Status(token),
+                    token => GetTransitionHandlers().Enable(token),
+                    token => GetTransitionHandlers().Disable(token))
+                : null;
+        RootCommand command = ClawCtlCommandLine.Create(
+            router.CreateHandlers(lazyTransitionHandlers));
 
         InvocationConfiguration configuration = new()
         {

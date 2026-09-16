@@ -45,13 +45,17 @@ internal sealed class TeardownOrchestrator
     public async Task<TeardownResult> RunUnderLockAsync(
         string helperPath,
         bool force,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool removeRecovery = true)
     {
-        GatewayPersistenceRemovalResult recovery = await _recovery.UninstallAsync(cancellationToken)
-            .ConfigureAwait(false);
-        if (!recovery.Succeeded)
+        if (removeRecovery)
         {
-            return new TeardownResult(false, recovery.Message, recovery.Detail);
+            GatewayPersistenceRemovalResult recovery = await _recovery
+                .UninstallAsync(cancellationToken).ConfigureAwait(false);
+            if (!recovery.Succeeded)
+            {
+                return new TeardownResult(false, recovery.Message, recovery.Detail);
+            }
         }
 
         GatewayStopResult gateway = await _gateway.StopUnderLockAsync(

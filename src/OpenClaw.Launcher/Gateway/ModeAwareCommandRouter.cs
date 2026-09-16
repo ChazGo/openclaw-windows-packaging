@@ -54,17 +54,24 @@ internal sealed class ModeAwareCommandRouter
         _output = output;
     }
 
-    public ClawCtlHandlers CreateHandlers() => new()
-    {
-        Setup = _setup,
-        Status = GetStatusAsync,
-        CollectLogs = (path, token) => Target.CollectLogs(path, token),
-        Teardown = (force, token) => Target.Teardown(force, token),
-        PowerShell = token => Target.PowerShell(token),
-        GatewayStart = StartGatewayAsync,
-        GatewayStatus = GetGatewayStatusAsync,
-        GatewayStop = StopGatewayAsync
-    };
+    public ClawCtlHandlers CreateHandlers(
+        GatewayIsolationCommandHandlers? isolationHandlers = null) => new()
+        {
+            Setup = _setup,
+            Status = GetStatusAsync,
+            CollectLogs = (path, token) => Target.CollectLogs(path, token),
+            Teardown = (force, token) => Target.Teardown(force, token),
+            PowerShell = token => Target.PowerShell(token),
+            GatewayStart = StartGatewayAsync,
+            GatewayStatus = GetGatewayStatusAsync,
+            GatewayStop = StopGatewayAsync,
+            GatewayIsolationStatus = isolationHandlers?.Status ??
+                (_ => Task.FromResult(1)),
+            GatewayIsolationEnable = isolationHandlers?.Enable ??
+                (_ => Task.FromResult(1)),
+            GatewayIsolationDisable = isolationHandlers?.Disable ??
+                (_ => Task.FromResult(1))
+        };
 
     private async Task<int> StartGatewayAsync(CancellationToken cancellationToken)
     {

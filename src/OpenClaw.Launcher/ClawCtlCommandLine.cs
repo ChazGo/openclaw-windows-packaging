@@ -14,6 +14,12 @@ internal sealed record ClawCtlHandlers
     public required Func<CancellationToken, Task<int>> GatewayStart { get; init; }
     public required Func<CancellationToken, Task<int>> GatewayStatus { get; init; }
     public required Func<CancellationToken, Task<int>> GatewayStop { get; init; }
+    public Func<CancellationToken, Task<int>> GatewayIsolationStatus { get; init; } =
+        _ => Task.FromResult(1);
+    public Func<CancellationToken, Task<int>> GatewayIsolationEnable { get; init; } =
+        _ => Task.FromResult(1);
+    public Func<CancellationToken, Task<int>> GatewayIsolationDisable { get; init; } =
+        _ => Task.FromResult(1);
 }
 
 internal sealed record SetupOptions(bool Fresh, bool Force, bool NoIsolation = false);
@@ -122,6 +128,27 @@ internal static class ClawCtlCommandLine
         gateway.Subcommands.Add(gatewayStart);
         gateway.Subcommands.Add(gatewayStatus);
         gateway.Subcommands.Add(gatewayStop);
+        Command gatewayIsolation = new(
+            "gateway-isolation",
+            "Inspect or change whether OpenClaw runs in its isolated identity.");
+        Command isolationStatus = new(
+            "status",
+            "Show the selected identity and its readiness without changing it.");
+        isolationStatus.SetAction((_, token) =>
+            handlers.GatewayIsolationStatus(token));
+        Command isolationEnable = new(
+            "enable",
+            "Provision and select the isolated OpenClaw identity.");
+        isolationEnable.SetAction((_, token) =>
+            handlers.GatewayIsolationEnable(token));
+        Command isolationDisable = new(
+            "disable",
+            "Confirm, then select the signed-in Windows user identity.");
+        isolationDisable.SetAction((_, token) =>
+            handlers.GatewayIsolationDisable(token));
+        gatewayIsolation.Subcommands.Add(isolationStatus);
+        gatewayIsolation.Subcommands.Add(isolationEnable);
+        gatewayIsolation.Subcommands.Add(isolationDisable);
 
         RootCommand root = new(RootDescription)
         {
@@ -130,7 +157,8 @@ internal static class ClawCtlCommandLine
             collectLogs,
             teardown,
             powerShell,
-            gateway
+            gateway,
+            gatewayIsolation
         };
 
         // Bare `clawctl` is a discovery request, not a usage error, so the root

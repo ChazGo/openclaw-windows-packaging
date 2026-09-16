@@ -217,6 +217,58 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
+    public async Task FreshNoIsolationIsRejectedBeforeResolvingSetupIntent()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--no-isolation", "--fresh"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            resolveGatewayIsolationSetup: _ => throw new GatewayIsolationException(
+                "Use `clawctl gateway-isolation disable`."));
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(lifecycle.Calls);
+        Assert.Contains(
+            "setup --fresh requires isolated-session provisioning",
+            output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IsolationCommandDoesNotResolveOrdinaryModeTarget()
+    {
+        int calls = 0;
+        var handlers = new GatewayIsolationCommandHandlers(
+            _ =>
+            {
+                calls++;
+                return Task.FromResult(0);
+            },
+            _ => Task.FromResult(0),
+            _ => Task.FromResult(0));
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(await CreateApplicationAsync().ConfigureAwait(true)),
+            ["gateway-isolation", "status"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            resolveGatewayIsolation: () => throw new InvalidOperationException(
+                "ordinary mode selection must remain lazy"),
+            gatewayIsolationHandlers: handlers);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
     public async Task AgentUsesTheRuntimeInstalledForTheSessionWithoutHostFallback()
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);

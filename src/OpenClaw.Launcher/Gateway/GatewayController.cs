@@ -162,6 +162,14 @@ internal sealed class GatewayController
         CancellationToken cancellationToken)
     {
         using ISessionLockHandle handle = AcquireLock();
+        return await StartUnderLockAsync(helperPath, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<GatewayStartResult> StartUnderLockAsync(
+        string helperPath,
+        CancellationToken cancellationToken)
+    {
         SessionRecord configured = _requireSetup();
         GatewayStateResult existing = _store.Read();
         if (existing.Record is null && existing.Fault != GatewayStateFault.Missing)

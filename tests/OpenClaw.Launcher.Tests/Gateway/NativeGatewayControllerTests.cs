@@ -222,6 +222,22 @@ public sealed class NativeGatewayControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task TransitionStopRetainsVerifiedRecordForRollback()
+    {
+        _process.Inspection = HealthySnapshot();
+        _ = await CreateController().StartAsync(CancellationToken.None);
+
+        GatewayStopResult stopped = await CreateController()
+            .StopUnderLockAsync(
+                CancellationToken.None,
+                clearRecord: false);
+
+        Assert.True(stopped.Stopped);
+        Assert.NotNull(Store.Read().Record);
+        Assert.Equal(1, _process.StopCount);
+    }
+
+    [Fact]
     public async Task StartIsIdempotentForHealthyOwnedProcess()
     {
         Store.Write(Record());

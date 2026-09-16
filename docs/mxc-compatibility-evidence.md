@@ -54,13 +54,22 @@ enabled; malformed, unsupported, or foreign-owner state fails closed.
 | `1`, `true`, `on`, or `yes` | Require the isolated session. A session failure is reported; the launcher does not silently fall back to the host. |
 
 Unrecognized values are rejected rather than interpreted as disabled.
-`clawctl status` preserves the recorded ownership record and does not provision
-or replace a session. It is not passive: `ProbeRecordedStatusAsync` invokes the
-backend `StartAsync` operation for the recorded provision as its status probe.
-When isolation is Disabled, status reads only native ownership, runtime, and
-recovery state and never attaches to a session. The
-`clawctl gateway-isolation enable|disable|status` transition surface is
-deferred to Layer 4.
+`clawctl status` is read-only: it reports the selected mode and its recorded
+session/Gateway or native runtime/Gateway state without provisioning or
+mutation. `clawctl gateway-isolation status` provides the same read-only
+identity-focused view. `enable` and `disable` serialize through the shared
+installation lifecycle lock, stop the strictly owned source before starting the
+destination, establish destination health and the shared recovery definition,
+atomically publish the new selection, and only then safely remove source
+ownership. They retain separate native and isolated ownership records until
+commit and never run both Gateways concurrently. Pre-commit failure cleans safe
+destination partials and restarts the retained source only after destination
+cleanup is verified; incomplete rollback is explicit.
+Disabling requires explicit interactive confirmation and defaults to No.
+Transitions never copy profile, credential, authentication, or backup data
+between identities. Transition cleanup never enables teardown/fresh force,
+unconfirmed-launch, or unavailable-inspection bypasses; ambiguous or
+uninspectable ownership blocks the transition.
 
 ## Agent runtime and helper
 

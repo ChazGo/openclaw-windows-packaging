@@ -123,6 +123,46 @@ public sealed class NativeInstallationRuntimeTests : IDisposable
         Assert.Equal(0, context.Process.LaunchCount);
     }
 
+    [Fact]
+    public void RuntimeCleanupDeletesOnlyEntriesBelowTheRecordedDirectoryIdentity()
+    {
+        string runtimeRoot = Path.Combine(_root, "runtime");
+        Directory.CreateDirectory(Path.Combine(runtimeRoot, "version"));
+        File.WriteAllText(Path.Combine(runtimeRoot, "version", "node.exe"), "fixture");
+        TrustedPath.FileIdentity identity =
+            TrustedPath.TryGetDirectoryIdentity(runtimeRoot)!.Value;
+
+        NativeInstallationRuntime.DeleteRuntimeDirectory(
+            runtimeRoot,
+            runtimeRoot,
+            identity);
+
+        Assert.True(Directory.Exists(runtimeRoot));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(runtimeRoot));
+    }
+
+    [Fact]
+    public void RuntimeCleanupRefusesAReplacedDirectoryIdentity()
+    {
+        string runtimeRoot = Path.Combine(_root, "runtime");
+        Directory.CreateDirectory(runtimeRoot);
+        TrustedPath.FileIdentity identity =
+            TrustedPath.TryGetDirectoryIdentity(runtimeRoot)!.Value;
+        Directory.Delete(runtimeRoot);
+        Directory.CreateDirectory(runtimeRoot);
+        string marker = Path.Combine(runtimeRoot, "unowned.txt");
+        File.WriteAllText(marker, "preserve");
+
+        IOException exception = Assert.Throws<IOException>(() =>
+            NativeInstallationRuntime.DeleteRuntimeDirectory(
+                runtimeRoot,
+                runtimeRoot,
+                identity));
+
+        Assert.Contains("changed identity", exception.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(marker));
+    }
+
     public void Dispose()
     {
         Directory.Delete(_root, recursive: true);

@@ -87,9 +87,44 @@ public sealed class ClawCtlCommandLineTests
                 ClawCtlCommandLine.CollectLogsCommandName,
                 "teardown",
                 "pwsh",
-                "gateway-service"
+                "gateway-service",
+                "gateway-isolation"
             ],
             root.Subcommands.Select(command => command.Name));
+    }
+
+    [Theory]
+    [InlineData("status")]
+    [InlineData("enable")]
+    [InlineData("disable")]
+    public async Task GatewayIsolationSubcommandsInvokeTheirHandler(string operation)
+    {
+        var calls = new List<string>();
+        RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
+        {
+            Setup = (_, _) => Task.FromResult(0),
+            Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
+            Teardown = (_, _) => Task.FromResult(0),
+            PowerShell = _ => Task.FromResult(0),
+            GatewayStart = _ => Task.FromResult(0),
+            GatewayStatus = _ => Task.FromResult(0),
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayIsolationStatus = _ => Record("status"),
+            GatewayIsolationEnable = _ => Record("enable"),
+            GatewayIsolationDisable = _ => Record("disable")
+        });
+
+        int exitCode = await root.Parse($"gateway-isolation {operation}").InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal([operation], calls);
+
+        Task<int> Record(string value)
+        {
+            calls.Add(value);
+            return Task.FromResult(0);
+        }
     }
 
     [Fact]
@@ -243,6 +278,10 @@ public sealed class ClawCtlCommandLineTests
     [InlineData("repair")]
     [InlineData("update-package")]
     [InlineData("gateway-service")]
+    [InlineData("gateway-isolation")]
+    [InlineData("gateway-isolation", "status", "extra")]
+    [InlineData("gateway-isolation", "enable", "--fresh")]
+    [InlineData("gateway-isolation", "disable", "--force")]
     [InlineData("setup", "extra")]
     [InlineData("setup", "--bogus")]
     [InlineData("setup", "--force")]

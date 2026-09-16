@@ -214,9 +214,30 @@ internal sealed partial class GatewayRuntime
         ArgumentNullException.ThrowIfNull(log);
 
         HostPaths paths = HostPaths.Create();
+        return CreateTeardownOrchestrator(
+            options,
+            paths,
+            session,
+            CreateRecoveryManager(paths, log),
+            log);
+    }
+
+    internal static TeardownOrchestrator CreateTeardownOrchestrator(
+        HostOptions options,
+        HostPaths paths,
+        SessionRuntime session,
+        IGatewayPersistence recovery,
+        Action<string> log)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(recovery);
+        ArgumentNullException.ThrowIfNull(log);
+
         return new TeardownOrchestrator(
             session.LifecycleLock,
-            CreateRecoveryManager(log),
+            recovery,
             CreateController(options, paths, session, log),
             session.Coordinator,
             session.GatewayState,

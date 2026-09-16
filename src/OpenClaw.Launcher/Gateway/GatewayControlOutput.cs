@@ -6,6 +6,20 @@ namespace OpenClaw.Launcher.Gateway;
 /// <summary>Writes gateway command results without trusting guest-produced log text.</summary>
 internal static class GatewayControlOutput
 {
+    public static async Task WriteStatusAsync(
+        TextWriter output,
+        GatewayLifecycleStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(status);
+
+        await output.WriteLineAsync(status.Message).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(status.Detail))
+        {
+            await output.WriteLineAsync(status.Detail).ConfigureAwait(false);
+        }
+    }
+
     private const int MaximumLogTailBytes = 16 * 1024;
     private const int LogTailLineCount = 10;
 
