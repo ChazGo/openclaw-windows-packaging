@@ -47,6 +47,13 @@ internal static class SessionInspector
         SessionInspectRequest request,
         Func<string, string> readFile)
     {
+        if (request.LaunchPending)
+        {
+            // No verified PID was recorded before the interrupted launch, so
+            // this reconciliation must never select or act on a process.
+            return new SessionInspectResult { RequestId = request.RequestId };
+        }
+
         try
         {
             using Process process = Process.GetProcessById(request.ProcessId);

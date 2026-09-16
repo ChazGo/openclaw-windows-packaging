@@ -231,7 +231,11 @@ internal sealed class SessionExecutor
             string resultText;
             try
             {
-                resultText = await File.ReadAllTextAsync(resultPath, cancellationToken)
+                using FileStream resultStream = TrustedPath.OpenRead(
+                    record.WorkspacePath,
+                    resultPath);
+                using var reader = new StreamReader(resultStream);
+                resultText = await reader.ReadToEndAsync(cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (Exception exception) when (

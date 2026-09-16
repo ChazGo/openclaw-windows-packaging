@@ -325,7 +325,8 @@ internal sealed class GatewayController
         string helperPath,
         CancellationToken cancellationToken,
         bool clearRecord = true,
-        bool allowUnconfirmedLaunch = false)
+        bool allowUnconfirmedLaunch = false,
+        bool allowUnavailableInspection = false)
     {
         GatewayStateResult state = _store.Read();
         if (state.Record?.LaunchPending == true)
@@ -380,11 +381,16 @@ internal sealed class GatewayController
         {
             // Nothing is killed on a guess. Acting on an unverified identifier
             // could stop an unrelated process that inherited it.
-            return new GatewayStopResult(
-                Stopped: false,
-                "The gateway could not be stopped because its state could not " +
-                "be established.",
-                inspection.Error, Succeeded: false);
+            return allowUnavailableInspection
+                ? new GatewayStopResult(
+                    Stopped: false,
+                    "Guest gateway inspection was unavailable; session removal will proceed without guest confirmation.",
+                    inspection.Error)
+                : new GatewayStopResult(
+                    Stopped: false,
+                    "The gateway could not be stopped because its state could not " +
+                    "be established. Re-run `clawctl teardown --force` to remove the owned session without guest confirmation.",
+                    inspection.Error, Succeeded: false);
         }
 
         if (!inspection.ProcessFound || !inspection.StartTimeMatches)
@@ -428,6 +434,7 @@ internal sealed class GatewayController
                 .InspectAsync(session, gateway, helperPath, cancellationToken)
                 .ConfigureAwait(false);
         }
+
         catch (Exception exception) when (
             exception is SessionException or Mxc.MxcException or IOException or UnauthorizedAccessException)
         {

@@ -19,6 +19,22 @@ public sealed class SessionGatewayClientTests : IDisposable
         }
     }
 
+    // This catches recovery serializing a placeholder PID into a request the
+    // guest rejects before it can reconcile the interrupted launch.
+    [Fact]
+    public void PendingInspectionRequestIsAcceptedWithoutAProcessIdentity()
+    {
+        SessionInspectRequest request = SessionInspectProtocol.ReadRequest(
+            SessionInspectProtocol.SerializeRequest(new SessionInspectRequest
+            {
+                RequestId = "request",
+                LaunchPending = true
+            }));
+
+        Assert.True(request.LaunchPending);
+        Assert.Equal(0, request.ProcessId);
+    }
+
     [Fact]
     public async Task StartUsesTheSharedWorkspaceRatherThanTheHostWorkingDirectory()
     {
