@@ -174,7 +174,8 @@ internal static class Program
             record = await runtime.StartForExecutionAsync(CancellationToken.None)
                 .ConfigureAwait(false);
         }
-        catch (Session.SessionException) when (mode == Session.SessionMode.Automatic)
+        catch (Session.SessionCapabilityUnavailableException)
+            when (mode == Session.SessionMode.Automatic)
         {
             log("Isolated session unavailable; running OpenClaw directly.");
             return await RunDirectAsync().ConfigureAwait(false);
