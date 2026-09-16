@@ -100,6 +100,82 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
+    public async Task AgentUsesTheRuntimeInstalledForTheSessionWithoutHostFallback()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, "app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(applicationDirectory, "openclaw.mjs"),
+            "console.log('fixture');");
+        string archivePath = Path.Combine(_testDirectory, "node-v24.15.0-win-x64.zip");
+        await File.WriteAllTextAsync(archivePath, "fixture");
+        var options = new HostOptions(applicationDirectory, archivePath, ["gateway"]);
+        var hostNode = new NodeRuntime(
+            Path.Combine(_testDirectory, "host-node.exe"),
+            new Version(24, 15, 0),
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+        SessionRuntime runtime = CreateSessionRuntime();
+
+        int setupExitCode = await Program.RunControlAsync(
+            options,
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            _ => Task.FromResult(hostNode),
+            () => runtime);
+        Assert.Equal(0, setupExitCode);
+
+        string expectedAgentNode = runtime.SetupState
+            .Read(runtime.ApplicationId).Record!.AgentNodePath!;
+        bool directLaunchAttempted = false;
+        _lastSessionBackend!.AttachedBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            Assert.Equal(expectedAgentNode, request.Executable);
+            return Task.FromResult(0);
+        };
+
+        await Assert.ThrowsAsync<SessionException>(() => Program.RunAgentAsync(
+            options,
+            _ => { },
+            _ => throw new InvalidOperationException("Host Node must not be resolved."),
+            (_, _, _, _, _) =>
+            {
+                directLaunchAttempted = true;
+                return Task.FromResult(0);
+            },
+            _ => runtime));
+
+        Assert.False(directLaunchAttempted);
+    }
+
+    [Fact]
+    public async Task TeardownRequiresForceBeforeRemovingTheSession()
+    {
+        SessionRuntime runtime = CreateSessionRuntime();
+        using var error = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(null, null, []),
+            ["teardown"],
+            _ => { },
+            TextWriter.Null,
+            error,
+            createSessionRuntime: () => runtime);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("--force", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            _lastSessionBackend!.Calls,
+            call => call.StartsWith("deprovision:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SetupResolvesNodeBeforeReportingMissingApplication()
     {
         bool nodeResolutionAttempted = false;
