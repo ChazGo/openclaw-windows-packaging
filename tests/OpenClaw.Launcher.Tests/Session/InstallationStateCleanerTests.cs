@@ -87,6 +87,43 @@ public sealed class InstallationStateCleanerTests : IDisposable
     }
 
     [Fact]
+    public void ClearRefusesADescendantReplacedAfterEnumeration()
+    {
+        string stateRoot = Path.Combine(_root, "state");
+        string dataRoot = Path.Combine(_root, "data");
+        string externalRoot = Path.Combine(_root, "external");
+        string movedOwnedDirectory = Path.Combine(_root, "owned-before-replacement");
+        string ownedDirectory = Path.Combine(stateRoot, "owned");
+        string ownedFile = Path.Combine(stateRoot, "delete-me.txt");
+        Directory.CreateDirectory(ownedDirectory);
+        Directory.CreateDirectory(externalRoot);
+        File.WriteAllText(Path.Combine(ownedDirectory, "owned.txt"), "owned");
+        File.WriteAllText(ownedFile, "owned");
+        File.WriteAllText(Path.Combine(externalRoot, "must-survive.txt"), "outside");
+        bool replaced = false;
+
+        var cleaner = new InstallationStateCleaner(
+            [stateRoot, dataRoot],
+            beforeDeleteEntry: entry =>
+            {
+                if (!replaced && string.Equals(entry, ownedDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    replaced = true;
+                    Directory.Move(ownedDirectory, movedOwnedDirectory);
+                    Directory.CreateSymbolicLink(ownedDirectory, externalRoot);
+                }
+            });
+
+        cleaner.Clear();
+
+        Assert.True(replaced);
+        Assert.True(File.Exists(Path.Combine(externalRoot, "must-survive.txt")));
+        Assert.True(File.Exists(Path.Combine(movedOwnedDirectory, "owned.txt")));
+        Assert.False(File.Exists(ownedFile));
+        Assert.True(Directory.Exists(ownedDirectory));
+    }
+
+    [Fact]
     public void ClearRejectsAReparsePointAncestor()
     {
         string external = Path.Combine(_root, "external");

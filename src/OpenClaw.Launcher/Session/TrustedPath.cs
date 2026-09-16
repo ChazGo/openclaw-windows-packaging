@@ -7,6 +7,26 @@ namespace OpenClaw.Launcher.Session;
 /// <summary>Rejects path redirection below a caller-established root.</summary>
 internal static partial class TrustedPath
 {
+    internal readonly record struct FileIdentity(uint VolumeSerialNumber, uint FileIndexHigh, uint FileIndexLow);
+
+    internal sealed class ValidatedDirectory : IDisposable
+    {
+        internal ValidatedDirectory(SafeFileHandle handle, FileIdentity identity, string finalPath)
+        {
+            Handle = handle;
+            Identity = identity;
+            FinalPath = finalPath;
+        }
+
+        internal SafeFileHandle Handle { get; }
+
+        internal FileIdentity Identity { get; }
+
+        internal string FinalPath { get; }
+
+        public void Dispose() => Handle.Dispose();
+    }
+
     public static void EnsureNoReparsePoints(string trustedRoot, string candidatePath) =>
         EnsureNoReparsePoints(trustedRoot, candidatePath, File.GetAttributes);
 
@@ -94,6 +114,7 @@ internal static partial class TrustedPath
                 $"The trusted file could not be opened: {candidatePath}",
                 new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
         }
+
         try
         {
             if ((File.GetAttributes(handle) & FileAttributes.ReparsePoint) != 0)
@@ -123,6 +144,96 @@ internal static partial class TrustedPath
         }
     }
 
+    internal static FileIdentity? TryGetDirectoryIdentity(string path)
+    {
+        using ValidatedDirectory? directory = TryOpenValidatedDirectory(path, expectedIdentity: null);
+        return directory?.Identity;
+    }
+
+    internal static ValidatedDirectory? TryOpenValidatedDirectory(
+        string path,
+        FileIdentity? expectedIdentity)
+    {
+        SafeFileHandle handle = CreateFile(
+            path,
+            Delete | FileReadAttributes,
+            FileShareRead | FileShareWrite | FileShareDelete,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+            IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            return null;
+        }
+
+        try
+        {
+            if ((File.GetAttributes(handle) & FileAttributes.ReparsePoint) != 0)
+            {
+                handle.Dispose();
+                return null;
+            }
+
+            FileIdentity identity = GetIdentity(handle);
+            if (expectedIdentity is not null && identity != expectedIdentity)
+            {
+                handle.Dispose();
+                return null;
+            }
+
+            return new ValidatedDirectory(handle, identity, NormalizePath(GetFinalPath(handle)));
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    internal static bool TryDeleteOwnedEntry(ValidatedDirectory root, string candidatePath)
+    {
+        SafeFileHandle handle = CreateFile(
+            candidatePath,
+            Delete | FileReadAttributes,
+            FileShareRead | FileShareWrite | FileShareDelete,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+            IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            return false;
+        }
+
+        using (handle)
+        {
+            FileAttributes attributes = File.GetAttributes(handle);
+            if ((attributes & FileAttributes.ReparsePoint) != 0 ||
+                !IsBelowRoot(root.FinalPath, NormalizePath(GetFinalPath(handle))))
+            {
+                return false;
+            }
+
+            if ((attributes & FileAttributes.Directory) != 0)
+            {
+                foreach (string child in Directory.EnumerateFileSystemEntries(candidatePath))
+                {
+                    TryDeleteOwnedEntry(root, child);
+                }
+            }
+
+            FileDispositionInformation disposition = new() { DeleteFile = true };
+            return SetFileInformationByHandle(
+                handle,
+                FileDispositionInfo,
+                ref disposition,
+                (uint)Marshal.SizeOf<FileDispositionInformation>());
+        }
+    }
+
     private static string GetFinalPath(SafeFileHandle handle)
     {
         char[] path = new char[260];
@@ -149,12 +260,63 @@ internal static partial class TrustedPath
             : value;
     }
 
+    private static FileIdentity GetIdentity(SafeFileHandle handle)
+    {
+        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation information))
+        {
+            throw new IOException("The opened path's identity could not be determined.");
+        }
+
+        return new FileIdentity(
+            information.VolumeSerialNumber,
+            information.FileIndexHigh,
+            information.FileIndexLow);
+    }
+
+    private static string NormalizePath(string path) =>
+        path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static bool IsBelowRoot(string root, string candidate)
+    {
+        string prefix = root + Path.DirectorySeparatorChar;
+        return candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private const uint Delete = 0x00010000;
     private const uint GenericRead = 0x80000000;
+    private const uint FileReadAttributes = 0x00000080;
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareWrite = 0x00000002;
     private const uint FileShareDelete = 0x00000004;
     private const uint OpenExisting = 3;
+    private const uint FileFlagBackupSemantics = 0x02000000;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const int FileDispositionInfo = 4;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInformation
+    {
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool DeleteFile;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public uint CreationTimeLow;
+        public uint CreationTimeHigh;
+        public uint LastAccessTimeLow;
+        public uint LastAccessTimeHigh;
+        public uint LastWriteTimeLow;
+        public uint LastWriteTimeHigh;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFile(
@@ -172,4 +334,18 @@ internal static partial class TrustedPath
         [Out] char[] path,
         uint length,
         uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle file,
+        out ByHandleFileInformation information);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileInformationByHandle(
+        SafeFileHandle file,
+        int fileInformationClass,
+        ref FileDispositionInformation fileInformation,
+        uint bufferSize);
 }
