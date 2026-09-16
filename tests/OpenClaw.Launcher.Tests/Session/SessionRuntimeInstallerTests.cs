@@ -73,41 +73,51 @@ public sealed class SessionRuntimeInstallerTests : IDisposable
             File.ReadAllText(SessionLaunchProtocol.ResultPathFor(RequestPath)));
     }
 
-    private string CreateArchive(string version)
+    private string CreateArchive(string version, string architecture = "x64")
     {
-        string archivePath = Path.Combine(_root, $"node-v{version}-win-x64.zip");
+        string archivePath = Path.Combine(
+            _root,
+            $"node-v{version}-win-{architecture}.zip");
         using ZipArchive archive = ZipFile.Open(archivePath, ZipArchiveMode.Create);
         ZipArchiveEntry entry = archive.CreateEntry(
-            $"node-v{version}-win-x64/node.exe");
+            $"node-v{version}-win-{architecture}/node.exe");
         using StreamWriter writer = new(entry.Open());
         writer.Write(version);
         return archivePath;
     }
 
-    [Fact]
-    public void ReinstallingIntoAnExistingAgentProfileReportsTheCurrentArchiveVersion()
+    [Theory]
+    [InlineData("x64")]
+    [InlineData("arm64")]
+    public void ReinstallingIntoAnExistingAgentProfileReportsTheCurrentArchiveVersion(
+        string architecture)
     {
-        Install(CreateArchive("24.15.0"));
+        Install(CreateArchive("24.15.0", architecture));
 
-        SessionRuntimeInstallResult result = Install(CreateArchive("24.20.0"));
+        SessionRuntimeInstallResult result = Install(
+            CreateArchive("24.20.0", architecture));
 
         Assert.Equal("24.20.0", result.Version);
-        Assert.Equal("node-v24.20.0-win-x64.zip", result.ArchiveName);
+        Assert.Equal(
+            $"node-v24.20.0-win-{architecture}.zip",
+            result.ArchiveName);
         Assert.Equal(
             Path.Combine(
                 _root,
                 "OpenClawGatewayMSIX",
                 "agent-node",
-                "node-v24.20.0-win-x64",
+                $"node-v24.20.0-win-{architecture}",
                 "node.exe"),
             result.ExecutablePath);
         Assert.Equal("24.20.0", File.ReadAllText(result.ExecutablePath!));
     }
 
-    [Fact]
-    public void InstallPersistsTheDirectoryContainingNode()
+    [Theory]
+    [InlineData("x64")]
+    [InlineData("arm64")]
+    public void InstallPersistsTheDirectoryContainingNode(string architecture)
     {
-        string archivePath = CreateArchive("24.20.0");
+        string archivePath = CreateArchive("24.20.0", architecture);
         File.WriteAllText(
             RequestPath,
             SessionRuntimeProtocol.SerializeRequest(new SessionRuntimeInstallRequest
@@ -134,7 +144,7 @@ public sealed class SessionRuntimeInstallerTests : IDisposable
                 _root,
                 "OpenClawGatewayMSIX",
                 "agent-node",
-                "node-v24.20.0-win-x64"),
+                $"node-v24.20.0-win-{architecture}"),
             persistedDirectory);
     }
 

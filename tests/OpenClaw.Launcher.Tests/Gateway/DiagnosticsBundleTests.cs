@@ -2,12 +2,28 @@ using System.IO.Compression;
 using OpenClaw.Launcher.Gateway;
 using OpenClaw.Launcher.Session;
 using OpenClaw.Launcher.Tests.Session;
+using OpenClaw.SessionProtocol;
 
 namespace OpenClaw.Launcher.Tests.Gateway;
 
 public sealed class DiagnosticsBundleTests : IDisposable
 {
     private readonly string _root = TestDirectory.Create();
+
+    [Theory]
+    [InlineData("openclaw-agent.sqlite")]
+    [InlineData("openclaw-agent.sqlite-wal")]
+    [InlineData("openclaw.sqlite")]
+    [InlineData("openclaw.sqlite-shm")]
+    [InlineData("auth-profiles.json")]
+    [InlineData("auth-profiles.json.backup")]
+    public void CredentialStoresAreExcludedByTheHostAndGuestPolicy(string fileName)
+    {
+        Assert.True(
+            SessionCollectProtocol.IsDenied(
+                fileName,
+                GatewayRuntime.DeniedBundleNames));
+    }
 
     [Fact]
     public async Task CollectionPreservesHostLogsAndRedactsEveryTextSource()

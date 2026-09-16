@@ -68,7 +68,7 @@ gateway-isolation selection:
 | `clawctl status` | Report the selected mode plus its session/Gateway or signed-in-user runtime/Gateway state without provisioning or replacing resources. |
 | `clawctl teardown --force` | Remove resources owned by the selected mode while retaining the installed package and mode selection. |
 | `clawctl pwsh` | Enabled opens an interactive PowerShell session inside the agent session. Disabled fails with guidance to use ordinary PowerShell. |
-| `clawctl collect-logs [--output <path>]` | Enabled includes reachable guest diagnostics. Disabled includes signed-in-user Gateway/profile diagnostics and never attaches to a session. |
+| `clawctl collect-logs [--output <path>]` | Enabled includes reachable guest diagnostics. Disabled includes signed-in-user Gateway/profile diagnostics without attaching to a session. Both exclude credential-bearing `openclaw-agent.sqlite*`, `openclaw.sqlite*`, and `auth-profiles*` files. |
 | `clawctl gateway-service start` | Start the OpenClaw gateway in the selected isolated or signed-in-user runtime. Requires setup. |
 | `clawctl gateway-service status` | Inspect the gateway without starting it. |
 | `clawctl gateway-service stop` | Stop the gateway while retaining the session and its data. |
@@ -126,9 +126,12 @@ contains `mode`, `ownerSid`, and `updatedUtc`. A missing record defaults to
 required isolation; malformed, unsupported, or foreign-owner state stops the
 launch rather than routing directly. Unpackaged development launches remain
 direct by default and may use `OPENCLAW_SESSION`; installed launches do not
-allow that development override to contradict persisted state. The existing command surface and recovery launcher observe selection changes
-immediately. A transition never runs both Gateways concurrently and retains the
-source identity long enough to restart it if pre-commit work fails. Transition
+let that development override change persisted state. A matching value is
+accepted as redundant; a conflicting value fails closed with transition
+guidance. The existing command surface and recovery launcher observe selection
+changes immediately. A transition never runs both Gateways concurrently and
+retains the source identity long enough to restart it if pre-commit work fails.
+Transition
 commands never copy credentials, authentication
 material, OpenClaw profile state, backup data, or internal host state between
 the isolated identity and the signed-in Windows user. Each identity retains its
@@ -137,11 +140,15 @@ No and cancels when input is redirected, unavailable, closed, malformed, or
 anything other than an explicit `y` or `yes`.
 
 For initial installed setup, plain `clawctl setup` selects Enabled and
-`clawctl setup --no-isolation` selects Disabled only when no installed selection
-exists. The selection is written only after setup succeeds.
-`OPENCLAW_SESSION` may match an existing installed selection for diagnosis, but
-cannot change or contradict it; use the gateway-isolation transition commands
-to change an existing selection.
+`clawctl setup --no-isolation` selects Disabled only when no installed
+selection exists. The selection is written only after setup succeeds. Plain
+setup preserves and repairs an existing selection; an Enabled installation
+rejects `setup --no-isolation` with guidance to run the confirmed disable
+transition, while a Disabled installation repairs idempotently. Explicit
+`--no-isolation` or a disabled development environment override cannot be
+combined with `--fresh`; rejection occurs before mutation or host-runtime
+preparation, and `--force` cannot bypass it. Use
+`gateway-isolation enable|disable` to change an existing selection.
 
 The launcher places Node.js in a Windows job configured with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The launcher remains alive while Node.js

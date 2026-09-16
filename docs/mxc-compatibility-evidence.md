@@ -23,29 +23,44 @@ into that command line.
 
 ## Session ownership and routing
 
-`clawctl setup` is the required lifecycle entry point when isolation is
-enabled. It writes package-local
-setup state and records the session that this installation owns in
-`session.json`. Ownership is never inferred from a machine account or profile:
+`clawctl setup` is the required lifecycle entry point. With no installed
+selection it provisions isolation and records Enabled only after setup and
+recovery succeed. `clawctl setup --no-isolation` instead prepares the
+signed-in-user runtime and records Disabled only after success. Plain setup
+preserves and repairs an existing selection; an Enabled installation rejects
+`--no-isolation` with guidance to use the confirmed disable transition.
+
+Enabled setup writes package-local state and records the session that this
+installation owns in `session.json`. Ownership is never inferred from a
+machine account or profile:
 unrelated agent accounts may exist, and teardown must remain safe and
 idempotent. When MXC reports that this recorded provision is missing, setup
 reprovisions a replacement for this installation and removes only a gateway
 record that names that explicitly stale session; it neither adopts unrelated
-machine agents nor disturbs a gateway record for any other session. `clawctl teardown [--force]` removes
-only the recorded owned session and local setup state; it does not uninstall
-the package.
+machine agents nor disturbs a gateway record for any other session.
+`clawctl teardown --force` removes resources owned by the selected mode while
+retaining the package and mode selection.
 
 `clawctl setup --fresh` explicitly authorizes a reset of this installation.
 It captures a redacted pre-reset report, performs the normal owned teardown,
 then clears only the contents of the package-owned state roots before running
-the ordinary setup route. It refuses unpackaged execution, never follows
-reparse points, and stops without a wipe or replacement setup when teardown is
-incomplete. It does not onboard OpenClaw or start the gateway.
+the persisted setup route without changing the selection; a persisted Disabled
+installation resets its native resources. Explicit `--no-isolation` or a
+disabled unpackaged-development environment override rejects `--fresh` before
+mutation or host-runtime preparation. `--force` is valid only with `--fresh`
+and cannot bypass that mode rejection. It may continue past unresolved
+external cleanup, but not a bounded local deletion failure. Fresh setup refuses
+unpackaged execution, never follows reparse points, and otherwise stops without
+a wipe or replacement setup when teardown is incomplete. It does not onboard
+OpenClaw or start the gateway.
 
 Installed `openclaw` and `clawctl` commands use the persisted
 `gateway-isolation.json` selection. A missing installed record defaults to
 enabled; malformed, unsupported, or foreign-owner state fails closed.
-`OPENCLAW_SESSION` remains only an unpackaged development override:
+Installed commands never let `OPENCLAW_SESSION` change the persisted selection:
+a matching value is accepted as redundant, while a conflicting value fails
+closed with transition guidance. The variable remains a mode selector only for
+unpackaged development:
 
 | Value | Result |
 |---|---|
@@ -160,8 +175,8 @@ setup. The collector does not enumerate arbitrary agent-profile files.
    gateway. Use `clawctl status` to inspect session ownership and state.
 4. Run `clawctl collect-logs` when reporting a problem, then review the
    resulting ZIP before sharing it.
-5. Run `clawctl teardown` to remove the owned isolated session while retaining
-   the installed package.
+5. Run `clawctl teardown --force` to remove resources owned by the selected
+   mode while retaining the installed package and mode selection.
 
 The `clawctl` command tree intentionally owns only these package-management
 operations. Upstream commands such as `doctor`, `gateway`, and `uninstall`

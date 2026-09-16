@@ -29,7 +29,7 @@ public sealed class SessionCollectorTests : IDisposable
     private string RequestPath => Path.Combine(_root, "collect.json");
 
     private static IReadOnlyList<string> Denied =>
-        ["openclaw-agent.sqlite*", "openclaw.sqlite*"];
+        ["openclaw-agent.sqlite*", "openclaw.sqlite*", "auth-profiles*"];
 
     private string Write(string relativePath, string content)
     {
@@ -101,6 +101,11 @@ public sealed class SessionCollectorTests : IDisposable
     [InlineData("openclaw-agent.sqlite")]
     [InlineData("openclaw-agent.sqlite-wal")]
     [InlineData("openclaw-agent.sqlite-shm")]
+    [InlineData("openclaw.sqlite")]
+    [InlineData("openclaw.sqlite-wal")]
+    [InlineData("openclaw.sqlite-shm")]
+    [InlineData("auth-profiles.json")]
+    [InlineData("auth-profiles.json.backup")]
     public void CredentialStoresAreNeverStaged(string fileName)
     {
         Write($"agent\\{fileName}", "secret-bearing");
