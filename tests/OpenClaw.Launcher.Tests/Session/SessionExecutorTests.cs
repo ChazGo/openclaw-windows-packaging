@@ -254,10 +254,10 @@ public sealed class SessionExecutorTests : IDisposable
                 Workspace),
             CancellationToken.None);
 
-        Assert.StartsWith(
-            Path.GetDirectoryName(node)!,
-            delivered!.Environment!["PATH"],
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Path.GetDirectoryName(node), delivered!.PathPrefix);
+        Assert.False(
+            delivered.Environment!.ContainsKey("PATH"),
+            "The host must not send a PATH that would replace the agent's own.");
     }
 
     [Fact]
