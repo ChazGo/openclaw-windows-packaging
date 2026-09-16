@@ -114,10 +114,8 @@ internal static class Program
                 : await RunAgentAsync(
                     options,
                     WriteDiagnostic,
-                    startup.ResolveNode ?? (_ => Task.FromResult(
-                        (startup.InstallNodeRuntime ?? NodeRuntimeInstaller.EnsureInstalled)(
-                            GetPackagedNodeArchivePath(options),
-                            WriteDiagnostic))),
+                    startup.ResolveNode ?? (_ => Task.FromResult(NodeRuntimeResolver.Resolve(
+                        GetPackagedNodeArchivePath(options)))),
                     startup.LaunchOpenClaw ?? GatewayLauncher.RunAsync,
                     startup.InstallationLifecycle is null
                         ? null
@@ -241,6 +239,7 @@ internal static class Program
         Func<CancellationToken, Task<NodeRuntime>>? resolveNode = null,
         Session.IInstallationLifecycle? installationLifecycle = null)
     {
+        _ = resolveNode;
         Session.IInstallationLifecycle lifecycle =
             installationLifecycle ?? Session.InstallationLifecycle.Production;
         Session.SessionRuntime? sessionRuntime = null;
@@ -257,7 +256,6 @@ internal static class Program
                     lifecycle,
                     log,
                     output,
-                    resolveNode,
                     cancellationToken),
                 Status = async cancellationToken =>
                 {
@@ -390,15 +388,14 @@ internal static class Program
         Session.IInstallationLifecycle lifecycle,
         Action<string> log,
         TextWriter output,
-        Func<CancellationToken, Task<NodeRuntime>>? resolveNode,
         CancellationToken cancellationToken)
     {
         string applicationDirectory = GetPackagedApplicationDirectory(options);
         log("Confirmed the packaged OpenClaw application is present.");
         ClawCtlConsole.WriteReadinessSummary(output, applicationDirectory);
 
-        Session.SessionRoutingDecision routing = await lifecycle
-            .GetSessionRoutingDecisionAsync(cancellationToken).ConfigureAwait(false);
+        Session.SessionRoutingDecision routing = await lifecycle.CheckSessionSupportAsync(
+            cancellationToken).ConfigureAwait(false);
         if (routing.Routing != Session.SessionRouting.Session)
         {
             await output.WriteLineAsync(
@@ -411,10 +408,7 @@ internal static class Program
             Session.SessionRoutingPolicy.ReadMode(
                 Environment.GetEnvironmentVariable) == Session.SessionMode.Disabled)
         {
-            NodeRuntime nodeRuntime = await (resolveNode ??
-                (_ => Task.FromResult(NodeRuntimeInstaller.EnsureInstalled(
-                    GetPackagedNodeArchivePath(options),
-                    log))))(cancellationToken).ConfigureAwait(false);
+            NodeRuntime nodeRuntime = lifecycle.PrepareHostRuntime(options, log);
             ClawCtlConsole.WriteNodeRuntimeSummary(output, nodeRuntime);
             await output.WriteLineAsync(
                 "OpenClaw setup completed without isolated-session provisioning.")
@@ -547,21 +541,10 @@ internal static class Program
         });
         Session.SessionStartResult session = await runtime.Coordinator
             .EnsureStartedWithResultAsync(cancellationToken).ConfigureAwait(false);
-        IEnumerable<string> supersededSandboxIds =
-            (session.SupersededRecord is null
-                ? Enumerable.Empty<string>()
-                : [session.SupersededRecord.SandboxId])
-            .Concat(session.Record.SupersededSandboxIds ?? [])
-            .Append(session.Record.SupersededSandboxId)
-            .Where(static id => !string.IsNullOrWhiteSpace(id))
-            .Select(static id => id!)
-            .Distinct(StringComparer.Ordinal);
-        foreach (string supersededSandboxId in supersededSandboxIds)
+        if (session.SupersededRecord is not null &&
+            runtime.GatewayState.ClearForSupersededSession(session.SupersededRecord.SandboxId))
         {
-            if (runtime.GatewayState.ClearForSupersededSession(supersededSandboxId))
-            {
-                log("Removed the gateway record for the superseded session.");
-            }
+            log("Removed the gateway record for the superseded session.");
         }
 
         Session.SessionRecord record = session.Record;
@@ -646,15 +629,7 @@ internal static class Program
         string nodeDirectory = Path.GetDirectoryName(agentNodePath)
             ?? throw new Session.SessionException(
                 "The agent's Node.js runtime has no parent directory.");
-        SessionToolInstallResult installedTools = await runtime.Executor.InstallToolsAsync(
-            record,
-            helperPath,
-            cancellationToken).ConfigureAwait(false);
-        Session.AgentTools tools = new(
-            Path.GetDirectoryName(installedTools.ShimPath)
-                ?? throw new Session.SessionException(
-                    "The installed agent command shim has no parent directory."),
-            installedTools.ShimPath!);
+        Session.AgentTools tools = Session.AgentToolShim.Install(record.WorkspacePath!);
         Session.AgentShell shell = Session.AgentShellResolver.Resolve(File.Exists);
 
         await output.WriteLineAsync(
