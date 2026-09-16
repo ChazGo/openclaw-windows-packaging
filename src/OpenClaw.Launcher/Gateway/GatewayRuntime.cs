@@ -36,9 +36,28 @@ internal sealed class GatewayRuntime
                 paths.GatewayLauncherPath,
                 Environment.GetFolderPath(Environment.SpecialFolder.Startup),
                 paths.StateRoot,
-                Path.Combine(AppContext.BaseDirectory, "openclaw.exe"),
+                Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Microsoft",
+                    "WindowsApps",
+                    "clawctl.exe"),
                 Path.Combine(Environment.SystemDirectory, "cmd.exe")),
-            log);
+            log,
+            ResolveUserSid);
+    }
+
+    private static string? ResolveUserSid(string accountName)
+    {
+        try
+        {
+            return new NTAccount(accountName)
+                .Translate(typeof(SecurityIdentifier))
+                .Value;
+        }
+        catch (IdentityNotMappedException)
+        {
+            return null;
+        }
     }
 
     public static GatewayRuntime Create(

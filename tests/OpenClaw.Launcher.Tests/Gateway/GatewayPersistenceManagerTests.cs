@@ -24,7 +24,10 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
 
     private string LauncherPath => Path.Combine(StateRoot, "gateway-launcher.cmd");
 
-    private GatewayPersistenceManager CreateManager() =>
+    private string AliasPath => Path.Combine(_root, "WindowsApps", "clawctl.exe");
+
+    private GatewayPersistenceManager CreateManager(
+        Func<string, string?>? resolveUserSid = null) =>
         new(
             _scheduler,
             new GatewayPersistenceOptions(
@@ -33,8 +36,9 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
                 LauncherPath: LauncherPath,
                 StartupFolderPath: StartupFolder,
                 WorkingDirectory: StateRoot,
-                AliasCommand: "clawctl.exe",
-                CommandProcessorPath: @"C:\Windows\System32\cmd.exe"));
+                AliasCommand: AliasPath,
+                CommandProcessorPath: @"C:\Windows\System32\cmd.exe"),
+            resolveUserSid: resolveUserSid);
 
     private GatewayTaskSnapshot DesiredSnapshot() =>
         GatewayTaskDefinition.CreateSnapshot(
@@ -89,6 +93,61 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task AnAccountNameTriggerResolvingToTheOwnerSidIsNotRewritten()
+    {
+        GatewayTaskSnapshot scheduledTask = DesiredSnapshot() with
+        {
+            LogonTriggerUserId = @"CONTOSO\agent",
+        };
+        _scheduler.Probe = GatewayTaskProbe.Present(scheduledTask);
+
+        GatewayPersistenceInstallResult result = await CreateManager(
+            account => account == @"CONTOSO\agent" ? "S-1-5-21-1" : null)
+            .InstallAsync(CancellationToken.None);
+
+        Assert.Equal(GatewayPersistenceState.Ready, result.State);
+        Assert.DoesNotContain(
+            _scheduler.Calls,
+            call => call.StartsWith("register:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnUnresolvableAccountNameTriggerIsRewritten()
+    {
+        GatewayTaskSnapshot scheduledTask = DesiredSnapshot() with
+        {
+            LogonTriggerUserId = @"CONTOSO\former-agent",
+        };
+        _scheduler.Probe = GatewayTaskProbe.Present(scheduledTask);
+
+        GatewayPersistenceInstallResult result = await CreateManager(_ => null)
+            .InstallAsync(CancellationToken.None);
+
+        Assert.Equal(GatewayPersistenceState.Ready, result.State);
+        Assert.Contains(
+            _scheduler.Calls,
+            call => call.StartsWith("register:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ATaskPointingAtAnOldPackageVersionIsRewritten()
+    {
+        _scheduler.Probe = GatewayTaskProbe.Present(DesiredSnapshot() with
+        {
+            Command = Path.Combine(_root, "old-package", "openclaw.exe"),
+            Arguments = "gateway-service start",
+        });
+
+        GatewayPersistenceInstallResult result =
+            await CreateManager().InstallAsync(CancellationToken.None);
+
+        Assert.Equal(GatewayPersistenceState.Ready, result.State);
+        Assert.Contains(
+            _scheduler.Calls,
+            call => call.StartsWith("register:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AnUnreadableProbeLeavesTheRegistrationAlone()
     {
         // Re-registering on a refused read is an unbounded retry: the write is
@@ -134,6 +193,54 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
                 manager.FallbackPath,
                 CancellationToken.None),
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FallbackStatusRequiresAnUnmodifiedLauncher()
+    {
+        _scheduler.RegisterResult = GatewayTaskOperation.Failure("Access is denied.");
+        GatewayPersistenceManager manager = CreateManager();
+        await manager.InstallAsync(CancellationToken.None);
+        await File.WriteAllTextAsync(
+            LauncherPath,
+            GatewayLauncherScript.Create(StateRoot, "stale.exe"),
+            CancellationToken.None);
+
+        GatewayPersistenceStatus status =
+            await manager.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal(GatewayPersistenceState.NotInstalled, status.State);
+    }
+
+    [Fact]
+    public async Task FallbackStatusRejectsAGeneratedMarkerWithARedirectedTarget()
+    {
+        _scheduler.RegisterResult = GatewayTaskOperation.Failure("Access is denied.");
+        GatewayPersistenceManager manager = CreateManager();
+        await manager.InstallAsync(CancellationToken.None);
+        await File.WriteAllTextAsync(
+            manager.FallbackPath,
+            GatewayLauncherScript.CreateFallback(Path.Combine(_root, "redirected.cmd")),
+            CancellationToken.None);
+
+        GatewayPersistenceStatus status =
+            await manager.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal(GatewayPersistenceState.NotInstalled, status.State);
+    }
+
+    [Fact]
+    public async Task GeneratedCommandFilesUseUtf8WithoutABom()
+    {
+        _scheduler.RegisterResult = GatewayTaskOperation.Failure("Access is denied.");
+        GatewayPersistenceManager manager = CreateManager();
+
+        await manager.InstallAsync(CancellationToken.None);
+
+        Assert.DoesNotContain((byte)0, await File.ReadAllBytesAsync(LauncherPath));
+        Assert.DoesNotContain((byte)0, await File.ReadAllBytesAsync(manager.FallbackPath));
+        Assert.NotEqual(new byte[] { 0xEF, 0xBB, 0xBF },
+            (await File.ReadAllBytesAsync(LauncherPath))[..3]);
     }
 
     [Fact]
@@ -312,6 +419,26 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task AGeneratedLauncherThatCannotBeDeletedIsReported()
+    {
+        GatewayPersistenceManager manager = CreateManager();
+        await manager.InstallAsync(CancellationToken.None);
+
+        using (FileStream handle = new(
+            LauncherPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read))
+        {
+            GatewayPersistenceRemovalResult result =
+                await manager.UninstallAsync(CancellationToken.None).ConfigureAwait(true);
+
+            Assert.False(result.Succeeded);
+            Assert.Contains(LauncherPath, result.Detail, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task TheLaunchCommandCanChangeWithoutReRegisteringTheTask()
     {
         GatewayPersistenceManager manager = CreateManager();
@@ -334,6 +461,10 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
             await File.ReadAllTextAsync(
                 LauncherPath,
                 CancellationToken.None),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            AliasPath,
+            await File.ReadAllTextAsync(LauncherPath, CancellationToken.None),
             StringComparison.Ordinal);
     }
 
