@@ -289,7 +289,7 @@ internal sealed class WindowsKillOnCloseJob : IDisposable
     [DllImport("kernel32.dll")]
     private static extern void DeleteProcThreadAttributeList(IntPtr list);
 
-    private static string BuildCommandLine(ProcessStartInfo startInfo)
+    internal static string BuildCommandLine(ProcessStartInfo startInfo)
     {
         var commandLine = new StringBuilder();
         AppendArgument(commandLine, startInfo.FileName);
@@ -338,7 +338,7 @@ internal sealed class WindowsKillOnCloseJob : IDisposable
         commandLine.Append('"');
     }
 
-    private static IntPtr BuildEnvironmentBlock(ProcessStartInfo startInfo)
+    internal static IntPtr BuildEnvironmentBlock(ProcessStartInfo startInfo)
     {
         var environment = new SortedDictionary<string, string>(
             StringComparer.OrdinalIgnoreCase);

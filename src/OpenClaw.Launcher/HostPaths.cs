@@ -54,6 +54,41 @@ internal static class PackageIdentity
     }
 
     /// <summary>
+    /// The full package name, including version and architecture, used as the
+    /// installed content generation.
+    /// </summary>
+    public static string? TryGetPackageFullName()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        uint length = 0;
+        int result = GetCurrentPackageFullName(ref length, null);
+        if (result == AppModelErrorNoPackage)
+        {
+            return null;
+        }
+
+        if (result != ErrorInsufficientBuffer || length == 0)
+        {
+            throw new InvalidOperationException(
+                $"Unable to determine the package generation (error {result}).");
+        }
+
+        var value = new char[length];
+        result = GetCurrentPackageFullName(ref length, value);
+        if (result != 0)
+        {
+            throw new InvalidOperationException(
+                $"Unable to determine the package generation (error {result}).");
+        }
+
+        return new string(value, 0, checked((int)length - 1));
+    }
+
+    /// <summary>
     /// Builds the MXC application id for a package family name.
     /// </summary>
     /// <remarks>
@@ -69,6 +104,12 @@ internal static class PackageIdentity
         ref uint packageFamilyNameLength,
         [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)]
         char[]? packageFamilyName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetCurrentPackageFullName(
+        ref uint packageFullNameLength,
+        [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)]
+        char[]? packageFullName);
 }
 
 /// <summary>
@@ -124,6 +165,13 @@ internal sealed class HostPaths
     /// Where the recorded gateway process and its persistence choices live.
     /// </summary>
     public string GatewayStatePath => Path.Combine(StateRoot, "gateway.json");
+
+    /// <summary>
+    /// The signed-in-user gateway record. Kept separate from the isolated
+    /// session record because the two targets have different ownership proofs.
+    /// </summary>
+    public string NativeGatewayStatePath =>
+        Path.Combine(StateRoot, "native-gateway.json");
 
     /// <summary>
     /// The gateway's launch configuration, kept separate from its recorded
