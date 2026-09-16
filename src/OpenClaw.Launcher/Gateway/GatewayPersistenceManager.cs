@@ -1,3 +1,4 @@
+using System.Security.Principal;
 using System.Text;
 
 namespace OpenClaw.Launcher.Gateway;
@@ -43,7 +44,7 @@ internal sealed class GatewayPersistenceManager
             options.PackageFamilyName,
             options.UserSid);
         _log = log ?? (_ => { });
-        _resolveUserSid = resolveUserSid ?? (_ => null);
+        _resolveUserSid = resolveUserSid ?? ResolveUserSid;
     }
 
     public string TaskName => _identity.Name;
@@ -248,7 +249,7 @@ internal sealed class GatewayPersistenceManager
             differences.Add("The logon trigger is scoped to a different user.");
         }
 
-        if (!Same(actual.UserId, desired.UserId))
+        if (!MatchesUserSid(actual.UserId, desired.UserId))
         {
             differences.Add("The task runs as a different user.");
         }
@@ -432,6 +433,19 @@ internal sealed class GatewayPersistenceManager
     private bool MatchesUserSid(string userId, string desiredSid) =>
         Same(userId, desiredSid) ||
         Same(_resolveUserSid(userId) ?? string.Empty, desiredSid);
+
+    private static string? ResolveUserSid(string accountName)
+    {
+        try
+        {
+            return ((SecurityIdentifier)new NTAccount(accountName)
+                .Translate(typeof(SecurityIdentifier))).Value;
+        }
+        catch (IdentityNotMappedException)
+        {
+            return null;
+        }
+    }
 
     private sealed record GatewayGeneratedFileRemoval(bool Changed, string? Detail);
 

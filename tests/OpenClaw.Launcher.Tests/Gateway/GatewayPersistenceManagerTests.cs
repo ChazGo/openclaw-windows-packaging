@@ -1,3 +1,4 @@
+using System.Security.Principal;
 using OpenClaw.Launcher.Gateway;
 
 namespace OpenClaw.Launcher.Tests.Gateway;
@@ -114,6 +115,40 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SchedulerNormalizedAccountNamesMatchTheCurrentUserSid()
+    {
+        string accountName = WindowsIdentity.GetCurrent().Name;
+        string userSid = WindowsIdentity.GetCurrent().User!.Value;
+        GatewayTaskSnapshot scheduledTask = GatewayTaskDefinition.CreateSnapshot(
+            userSid,
+            @"C:\Windows\System32\cmd.exe",
+            LauncherPath) with
+        {
+            UserId = accountName,
+            LogonTriggerUserId = accountName,
+        };
+        _scheduler.Probe = GatewayTaskProbe.Present(scheduledTask);
+        var manager = new GatewayPersistenceManager(
+            _scheduler,
+            new GatewayPersistenceOptions(
+                UserSid: userSid,
+                PackageFamilyName: "OpenClaw.Gateway_test",
+                LauncherPath: LauncherPath,
+                StartupFolderPath: StartupFolder,
+                WorkingDirectory: StateRoot,
+                AliasCommand: AliasPath,
+                CommandProcessorPath: @"C:\Windows\System32\cmd.exe"));
+
+        GatewayPersistenceInstallResult result =
+            await manager.InstallAsync(CancellationToken.None);
+
+        Assert.Equal(GatewayPersistenceState.Ready, result.State);
+        Assert.DoesNotContain(
+            _scheduler.Calls,
+            call => call.StartsWith("register:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AnUnresolvableAccountNameTriggerIsRewritten()
     {
         GatewayTaskSnapshot scheduledTask = DesiredSnapshot() with
@@ -124,6 +159,25 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
 
         GatewayPersistenceInstallResult result = await CreateManager(_ => null)
             .InstallAsync(CancellationToken.None);
+
+        Assert.Equal(GatewayPersistenceState.Ready, result.State);
+        Assert.Contains(
+            _scheduler.Calls,
+            call => call.StartsWith("register:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SchedulerUnmappedAccountNamesRemainDrift()
+    {
+        GatewayTaskSnapshot scheduledTask = DesiredSnapshot() with
+        {
+            UserId = @"OPENCLAW-NONEXISTENT\former-agent",
+            LogonTriggerUserId = @"OPENCLAW-NONEXISTENT\former-agent",
+        };
+        _scheduler.Probe = GatewayTaskProbe.Present(scheduledTask);
+
+        GatewayPersistenceInstallResult result =
+            await CreateManager().InstallAsync(CancellationToken.None);
 
         Assert.Equal(GatewayPersistenceState.Ready, result.State);
         Assert.Contains(

@@ -48,6 +48,11 @@ public sealed class HostPathsTests
             paths.StateRoot,
             paths.GatewayIsolationStatePath,
             StringComparison.Ordinal);
+        Assert.StartsWith(
+            paths.StateRoot,
+            paths.NativeGatewayStatePath,
+            StringComparison.Ordinal);
+        Assert.NotEqual(paths.GatewayStatePath, paths.NativeGatewayStatePath);
         Assert.NotEqual(paths.LogPath, paths.SessionStatePath);
     }
 
@@ -72,5 +77,6 @@ public sealed class HostPathsTests
         // The test host is never packaged, so this also proves that unpackaged
         // is reported rather than thrown.
         Assert.Null(PackageIdentity.TryGetPackageFamilyName());
+        Assert.Null(PackageIdentity.TryGetPackageFullName());
     }
 }

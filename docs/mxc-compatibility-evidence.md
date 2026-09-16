@@ -107,6 +107,12 @@ owned by that process or one of its descendants. A missing record is
 process is `Unhealthy`; and failed inspection is `Unknown` to avoid starting a
 second gateway beside one that could still be healthy.
 
+The routing layer also has an internal signed-in-user lifecycle for isolation
+disabled. It uses a separate `native-gateway.json` record and validates the
+process creation time, owner SID, Windows session, Node path, packaged entry
+point, package generation, owned loopback port, and endpoint health before
+claiming or stopping the process. This layer does not expose a new command.
+
 ## Diagnostics and safe collection
 
 `clawctl collect-logs [--output <path>]` creates a ZIP at the supplied path or

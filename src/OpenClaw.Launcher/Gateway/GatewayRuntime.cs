@@ -1,4 +1,5 @@
 using System.Security.Principal;
+using System.Diagnostics;
 using OpenClaw.Launcher.Session;
 
 namespace OpenClaw.Launcher.Gateway;
@@ -56,6 +57,69 @@ internal sealed partial class GatewayRuntime
                 paths.StateRoot,
                 Path.Combine(AppContext.BaseDirectory, "openclaw.exe"),
                 Path.Combine(Environment.SystemDirectory, "cmd.exe")),
+            log);
+    }
+
+    /// <summary>
+    /// Builds the signed-in-user lifecycle without exposing it through a
+    /// command handler. Layer 3 selects this target when isolation is disabled.
+    /// </summary>
+    internal static IGatewayLifecycle CreateNativeLifecycle(
+        HostOptions options,
+        NodeRuntime hostRuntime,
+        Action<string> log)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(hostRuntime);
+        ArgumentNullException.ThrowIfNull(log);
+
+        HostPaths paths = HostPaths.Create();
+        string packageFamilyName = paths.PackageFamilyName
+            ?? throw new SessionException(
+                "OpenClaw is not running from its installed package, so it " +
+                "cannot own a signed-in-user gateway.");
+        string applicationId = PackageIdentity.ToApplicationId(packageFamilyName);
+        string CurrentGeneration() =>
+            PackageIdentity.TryGetPackageFullName()
+            ?? throw new SessionException(
+                "The installed package generation is unavailable.");
+
+        NativeGatewayLaunchRequest CreateRequest()
+        {
+            string applicationDirectory = options.PackagedApplicationDirectory
+                ?? throw new SessionException(
+                    "The packaged OpenClaw application was not found.");
+            string ownerSid = WindowsIdentity.GetCurrent().User?.Value
+                ?? throw new SessionException(
+                    "The signed-in user's security identifier is unavailable.");
+            GatewayLaunchConfiguration configuration =
+                new GatewayConfigurationStore(paths.GatewayConfigurationPath)
+                    .Resolve(paths.StateRoot, Environment.GetEnvironmentVariable);
+            string workingDirectory = configuration.WorkingDirectory
+                ?? throw new SessionException(
+                    "The signed-in-user gateway working directory was not resolved.");
+
+            return new NativeGatewayLaunchRequest(
+                hostRuntime.ExecutablePath,
+                Path.Combine(applicationDirectory, "openclaw.mjs"),
+                workingDirectory,
+                CurrentGeneration(),
+                ownerSid,
+                Process.GetCurrentProcess().SessionId,
+                configuration.Port,
+                Path.Combine(
+                    paths.StateRoot,
+                    "Logs",
+                    $"native-gateway-{Guid.NewGuid():N}.log"));
+        }
+
+        return new NativeGatewayController(
+            new NativeGatewayStateStore(paths.NativeGatewayStatePath),
+            new WindowsNativeGatewayProcess(),
+            new LoopbackGatewayHealthProbe(),
+            CreateRequest,
+            CurrentGeneration,
+            new NamedSessionLock(applicationId + "_Installation"),
             log);
     }
 

@@ -32,6 +32,12 @@ internal enum GatewayState
     /// </summary>
     Unknown,
     Starting,
+
+    /// <summary>
+    /// The record belongs to another package/content generation and cannot be
+    /// restarted until its old process is proven absent or safely stopped.
+    /// </summary>
+    Stale,
 }
 
 internal sealed record GatewayStatusReport(
