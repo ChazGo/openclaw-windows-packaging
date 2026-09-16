@@ -78,7 +78,8 @@ internal sealed class InstallationLifecycle : IInstallationLifecycle
 
     public IInstallationStateCleaner CreateStateCleaner(SessionRuntime runtime) =>
         new InstallationStateCleaner(
-            [runtime.Paths.StateRoot, HostDataPaths.GetProductLocalStateRoot()]);
+            runtime.Paths,
+            HostDataPaths.GetProductLocalStateRoot());
 
     public Task<GatewayPersistenceInstallResult> InstallRecoveryAsync(
         Action<string> log,

@@ -8,13 +8,13 @@ namespace OpenClaw.Launcher.Gateway;
 internal sealed partial class GatewayRuntime
 {
     private readonly HostPaths _paths;
-    private readonly SessionRuntime _session;
+    private readonly SessionRuntime? _session;
 
     private GatewayRuntime(
         GatewayController controller,
         string helperPath,
         HostPaths paths,
-        SessionRuntime session)
+        SessionRuntime? session)
     {
         Controller = controller;
         HelperPath = helperPath;
@@ -26,15 +26,22 @@ internal sealed partial class GatewayRuntime
 
     public string HelperPath { get; }
 
-    private SessionRuntime Session => _session;
+    private SessionRuntime Session =>
+        _session ?? throw new InvalidOperationException(
+            "This diagnostics runtime has no isolated-session client.");
 
     private static bool FileExists(string path) => File.Exists(path);
 
     public static GatewayPersistenceManager CreateRecoveryManager(Action<string> log)
+        => CreateRecoveryManager(HostPaths.Create(), log);
+
+    internal static GatewayPersistenceManager CreateRecoveryManager(
+        HostPaths paths,
+        Action<string> log)
     {
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(log);
 
-        HostPaths paths = HostPaths.Create();
         string packageFamilyName = paths.PackageFamilyName
             ?? throw new SessionException(
                 "OpenClaw is not running from its installed package, so it cannot configure gateway recovery.");
@@ -59,19 +66,19 @@ internal sealed partial class GatewayRuntime
     /// Builds the signed-in-user lifecycle without exposing it through a
     /// command handler. Layer 3 selects this target when isolation is disabled.
     /// </summary>
-    internal static IGatewayLifecycle CreateNativeLifecycle(
+    internal static NativeGatewayController CreateNativeLifecycle(
         HostOptions options,
+        HostPaths paths,
+        ISessionLock lifecycleLock,
         Action<string> log)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(log);
 
-        HostPaths paths = HostPaths.Create();
         string packageFamilyName = paths.PackageFamilyName
             ?? throw new SessionException(
                 "OpenClaw is not running from its installed package, so it " +
                 "cannot own a signed-in-user gateway.");
-        string applicationId = PackageIdentity.ToApplicationId(packageFamilyName);
         string CurrentGeneration() =>
             PackageIdentity.TryGetPackageFullName()
             ?? throw new SessionException(
@@ -112,8 +119,18 @@ internal sealed partial class GatewayRuntime
             new LoopbackGatewayHealthProbe(),
             CreateRequest,
             CurrentGeneration,
-            new NamedSessionLock(applicationId + "_Installation"),
+            lifecycleLock,
             log);
+    }
+
+    internal static GatewayRuntime CreateDiagnostics(HostPaths paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return new GatewayRuntime(
+            controller: null!,
+            helperPath: string.Empty,
+            paths,
+            session: null);
     }
 
     public static GatewayRuntime Create(

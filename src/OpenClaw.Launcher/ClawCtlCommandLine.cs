@@ -43,14 +43,14 @@ internal static class ClawCtlCommandLine
         "Set up and manage the packaged OpenClaw application." +
         Environment.NewLine +
         Environment.NewLine +
-        "Run `clawctl setup` to prepare the bundled runtime and isolated session." +
+        "Run `clawctl setup` to prepare the selected gateway-isolation mode." +
         Environment.NewLine +
         Environment.NewLine +
         "Run `openclaw <arguments>` to invoke the OpenClaw CLI.";
 
     public static string SetupDescription =>
         "Extract or repair the bundled Node.js runtime in package LocalState " +
-        "and confirm the packaged OpenClaw application is present.";
+        "and prepare the selected gateway-isolation mode.";
 
     // runSetup stays a delegate so the command tree owns parsing and help while
     // Program keeps the readiness operation and its test seams.
@@ -81,7 +81,7 @@ internal static class ClawCtlCommandLine
                 cancellationToken));
         Command status = new(
             StatusCommandName,
-            "Show the isolated-session record and MXC-observed provision state without provisioning a replacement.");
+            "Show the selected gateway-isolation mode and its recorded state without changing it.");
         status.SetAction((_, cancellationToken) => handlers.Status(cancellationToken));
         Option<string?> outputPath = new("--output")
         {
@@ -89,12 +89,12 @@ internal static class ClawCtlCommandLine
         };
         Command collectLogs = new(
             CollectLogsCommandName,
-            "Create a redacted diagnostics bundle, including session files when reachable.");
+            "Create a redacted diagnostics bundle for the selected mode.");
         collectLogs.Options.Add(outputPath);
         collectLogs.SetAction((parsed, cancellationToken) =>
             handlers.CollectLogs(parsed.GetValue(outputPath), cancellationToken));
         Option<bool> teardownForce = new("--force") { Description = "Skip confirmation and remove the owned session." };
-        Command teardown = new("teardown", "Stop and remove the owned isolated session.");
+        Command teardown = new("teardown", "Remove resources owned by the selected mode.");
         teardown.Options.Add(teardownForce);
         teardown.SetAction((parsed, cancellationToken) =>
             handlers.Teardown(parsed.GetValue(teardownForce), cancellationToken));
@@ -104,7 +104,7 @@ internal static class ClawCtlCommandLine
         powerShell.SetAction((_, cancellationToken) => handlers.PowerShell(cancellationToken));
         Command gateway = new(
             "gateway-service",
-            "Manage the background OpenClaw gateway inside the isolated session.");
+            "Manage the background OpenClaw gateway for the selected mode.");
         Command gatewayStart = new("start", "Start the gateway if it is not running.");
         gatewayStart.SetAction((_, token) => handlers.GatewayStart(token));
         Command gatewayStatus = new("status", "Show the gateway state without changing it.");

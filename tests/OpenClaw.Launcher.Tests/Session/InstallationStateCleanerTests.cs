@@ -24,6 +24,9 @@ public sealed class InstallationStateCleanerTests : IDisposable
         File.WriteAllText(Path.Combine(stateRoot, "session.json"), "{not-json");
         File.WriteAllText(Path.Combine(stateRoot, "unknown.bin"), "leftover");
         File.WriteAllText(Path.Combine(stateRoot, "Logs", "openclaw.log"), "log");
+        File.WriteAllText(
+            Path.Combine(stateRoot, "gateway-isolation.json"),
+            "selection");
         File.WriteAllText(Path.Combine(dataRoot, "NodeJS", "node.exe"), "runtime");
 
         var cleaner = new InstallationStateCleaner(
@@ -32,7 +35,9 @@ public sealed class InstallationStateCleanerTests : IDisposable
 
         cleaner.Clear();
 
-        Assert.Empty(Directory.EnumerateFileSystemEntries(stateRoot));
+        Assert.Equal(
+            [Path.Combine(stateRoot, "gateway-isolation.json")],
+            Directory.EnumerateFileSystemEntries(stateRoot));
         Assert.Empty(Directory.EnumerateFileSystemEntries(dataRoot));
     }
 

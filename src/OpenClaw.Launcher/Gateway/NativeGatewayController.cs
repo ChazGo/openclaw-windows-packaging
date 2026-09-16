@@ -134,6 +134,12 @@ internal sealed class NativeGatewayController : IGatewayLifecycle
         CancellationToken cancellationToken)
     {
         using ISessionLockHandle handle = AcquireLock();
+        return await StartUnderLockAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<GatewayLifecycleStartResult> StartUnderLockAsync(
+        CancellationToken cancellationToken)
+    {
         NativeGatewayStateResult state = _store.Read();
         if (state.Record is null && state.Fault != NativeGatewayStateFault.Missing)
         {
@@ -248,6 +254,12 @@ internal sealed class NativeGatewayController : IGatewayLifecycle
     public async Task<GatewayStopResult> StopAsync(CancellationToken cancellationToken)
     {
         using ISessionLockHandle handle = AcquireLock();
+        return await StopUnderLockAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<GatewayStopResult> StopUnderLockAsync(
+        CancellationToken cancellationToken)
+    {
         NativeGatewayStateResult state = _store.Read();
         if (state.Record is null)
         {

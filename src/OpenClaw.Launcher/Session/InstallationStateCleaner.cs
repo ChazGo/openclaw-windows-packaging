@@ -4,20 +4,28 @@ namespace OpenClaw.Launcher.Session;
 internal sealed class InstallationStateCleaner : IInstallationStateCleaner
 {
     private readonly string[] _roots;
+    private readonly HashSet<string> _preservedPaths;
     private readonly IInstallationFileSystem _fileSystem;
 
     public InstallationStateCleaner(HostPaths paths, string productLocalStateRoot)
-        : this([paths.StateRoot, productLocalStateRoot], paths.PackageFamilyName)
+        : this(
+            [paths.StateRoot, productLocalStateRoot],
+            paths.PackageFamilyName,
+            preservedPaths: [paths.GatewayIsolationStatePath])
     {
     }
 
     internal InstallationStateCleaner(
         IReadOnlyList<string> trustedRoots,
         string? packageFamilyName = "test",
-        IInstallationFileSystem? fileSystem = null)
+        IInstallationFileSystem? fileSystem = null,
+        IReadOnlyList<string>? preservedPaths = null)
     {
         ArgumentNullException.ThrowIfNull(trustedRoots);
         _fileSystem = fileSystem ?? PhysicalInstallationFileSystem.Instance;
+        _preservedPaths = new HashSet<string>(
+            preservedPaths?.Select(Path.GetFullPath) ?? [],
+            StringComparer.OrdinalIgnoreCase);
         if (packageFamilyName is null)
         {
             throw new SessionException(
@@ -43,6 +51,10 @@ internal sealed class InstallationStateCleaner : IInstallationStateCleaner
 
             foreach (string entry in _fileSystem.EnumerateFileSystemEntries(root))
             {
+                if (_preservedPaths.Contains(Path.GetFullPath(entry)))
+                {
+                    continue;
+                }
                 DeleteEntry(entry, _fileSystem);
             }
         }

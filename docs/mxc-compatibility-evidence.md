@@ -23,7 +23,8 @@ into that command line.
 
 ## Session ownership and routing
 
-`clawctl setup` is the required lifecycle entry point. It writes package-local
+`clawctl setup` is the required lifecycle entry point when isolation is
+enabled. It writes package-local
 setup state and records the session that this installation owns in
 `session.json`. Ownership is never inferred from a machine account or profile:
 unrelated agent accounts may exist, and teardown must remain safe and
@@ -41,7 +42,10 @@ the ordinary setup route. It refuses unpackaged execution, never follows
 reparse points, and stops without a wipe or replacement setup when teardown is
 incomplete. It does not onboard OpenClaw or start the gateway.
 
-`openclaw` uses `OPENCLAW_SESSION` to select a route:
+Installed `openclaw` and `clawctl` commands use the persisted
+`gateway-isolation.json` selection. A missing installed record defaults to
+enabled; malformed, unsupported, or foreign-owner state fails closed.
+`OPENCLAW_SESSION` remains only an unpackaged development override:
 
 | Value | Result |
 |---|---|
@@ -50,8 +54,10 @@ incomplete. It does not onboard OpenClaw or start the gateway.
 | `1`, `true`, `on`, or `yes` | Require the isolated session. A session failure is reported; the launcher does not silently fall back to the host. |
 
 Unrecognized values are rejected rather than interpreted as disabled.
-`clawctl status` is read-only: it reports recorded ownership and observed
-state without provisioning or starting a session.
+`clawctl status` is read-only: it reports the selected mode and its recorded
+session/Gateway or native runtime/Gateway state without provisioning or
+mutation. The `clawctl gateway-isolation enable|disable|status` transition
+surface is deferred to Layer 4.
 
 ## Agent runtime and helper
 
@@ -83,9 +89,10 @@ interactive defaults.
 
 ## Gateway lifecycle and recovery
 
-`clawctl gateway-service start` starts the gateway inside the owned session;
-`status` observes it without starting it; and `stop` stops it while leaving the
-session and agent data intact. All require the setup record where appropriate.
+`clawctl gateway-service start|status|stop` dispatches through the persisted
+mode. Enabled uses the owned session lifecycle; disabled uses the separate
+signed-in-user lifecycle and ownership record. Status never provisions or
+starts either target.
 The launcher does not impose an invented port: the OpenClaw configuration and
 upstream default choose it unless configuration explicitly supplies one.
 
@@ -110,10 +117,9 @@ claiming or stopping the process. This layer does not expose a new command.
 ## Diagnostics and safe collection
 
 `clawctl collect-logs [--output <path>]` creates a ZIP at the supplied path or
-in package state by default. It collects host diagnostics and, when the owned
-session can be reached, stages selected agent diagnostics through the guest
-helper. A session collection failure is a warning rather than a reason to
-discard available host diagnostics.
+in package state by default. Enabled stages selected agent diagnostics when the
+owned session is reachable. Disabled collects signed-in-user Gateway and
+profile diagnostics without attaching to, probing, or provisioning MXC.
 
 Agent paths are relative to the agent profile: OpenClaw logs come from
 `AppData\Local\Temp\openclaw`, and configuration candidates are

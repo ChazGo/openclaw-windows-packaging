@@ -11,7 +11,15 @@ internal sealed record DiagnosticsBundleResult(
     bool SessionReached,
     IReadOnlyList<string> Notes);
 
-internal sealed partial class GatewayRuntime
+internal interface IDiagnosticsCollector
+{
+    Task<DiagnosticsBundleResult> CollectLogsAsync(
+        string? requestedPath,
+        bool includeSession,
+        CancellationToken cancellationToken);
+}
+
+internal sealed partial class GatewayRuntime : IDiagnosticsCollector
 {
     /// <summary>
     /// File names that must never reach a bundle, matched with a trailing
@@ -99,8 +107,17 @@ internal sealed partial class GatewayRuntime
     /// best-effort: someone runs this because something is broken, and a
     /// host-only bundle is still worth handing over.
     /// </remarks>
+    public Task<DiagnosticsBundleResult> CollectLogsAsync(
+        string? requestedPath,
+        CancellationToken cancellationToken) =>
+        CollectLogsAsync(
+            requestedPath,
+            includeSession: true,
+            cancellationToken);
+
     public async Task<DiagnosticsBundleResult> CollectLogsAsync(
         string? requestedPath,
+        bool includeSession,
         CancellationToken cancellationToken)
     {
         string bundlePath = ResolveBundlePath(
@@ -111,12 +128,20 @@ internal sealed partial class GatewayRuntime
         List<string> notes = [];
         List<(string Name, string Path)> hostFiles = CollectHostFiles();
         string? staged = null;
-        string? workspace;
+        string? workspace = null;
 
         try
         {
-            (staged, workspace, bool sessionReached) =
-                await TryStageAgentFilesAsync(notes, cancellationToken).ConfigureAwait(false);
+            bool sessionReached = false;
+            if (includeSession)
+            {
+                (staged, workspace, sessionReached) =
+                    await TryStageAgentFilesAsync(notes, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                AddNativeProfileFiles(hostFiles, notes);
+            }
 
             if (hostFiles.Count == 0 && staged is null)
             {
@@ -148,11 +173,20 @@ internal sealed partial class GatewayRuntime
     {
         List<(string Name, string Path)> files = [];
         Add("host/openclaw.log", _paths.LogPath);
+        Add("host/gateway-isolation.json", _paths.GatewayIsolationStatePath);
         Add("host/setup.json", _paths.SetupStatePath);
         Add("host/session.json", _paths.SessionStatePath);
         Add("host/gateway-config.json", _paths.GatewayConfigurationPath);
         Add("host/gateway-state.json", _paths.GatewayStatePath);
+        Add("host/native-gateway.json", _paths.NativeGatewayStatePath);
         Add("host/gateway-launcher.cmd", _paths.GatewayLauncherPath);
+
+        NativeGatewayStateResult native = new NativeGatewayStateStore(
+            _paths.NativeGatewayStatePath).Read();
+        if (native.Record?.LogPath is { Length: > 0 } nativeLog)
+        {
+            Add("host/native-gateway.log", nativeLog);
+        }
         return files;
 
         void Add(string name, string? path)
@@ -160,6 +194,51 @@ internal sealed partial class GatewayRuntime
             if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
             {
                 files.Add((name, path));
+            }
+        }
+    }
+
+    private static void AddNativeProfileFiles(
+        List<(string Name, string Path)> hostFiles,
+        List<string> notes)
+    {
+        string profileRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".openclaw");
+        AddCandidate("profile/openclaw.json", Path.Combine(profileRoot, "openclaw.json"));
+
+        string logDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Temp",
+            "openclaw");
+        if (!Directory.Exists(logDirectory))
+        {
+            notes.Add("No signed-in-user OpenClaw log directory was found.");
+            return;
+        }
+
+        try
+        {
+            foreach (string path in Directory.EnumerateFiles(
+                logDirectory,
+                "*.log",
+                SearchOption.TopDirectoryOnly))
+            {
+                AddCandidate($"profile/logs/{Path.GetFileName(path)}", path);
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            notes.Add(
+                $"Signed-in-user OpenClaw logs could not be enumerated: {exception.Message}");
+        }
+
+        void AddCandidate(string name, string path)
+        {
+            if (File.Exists(path))
+            {
+                hostFiles.Add((name, path));
             }
         }
     }

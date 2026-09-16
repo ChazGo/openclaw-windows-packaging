@@ -51,3 +51,23 @@ internal sealed class SessionGatewayLifecycle(
     public Task<GatewayStopResult> StopAsync(CancellationToken cancellationToken) =>
         controller.StopAsync(helperPath, cancellationToken);
 }
+
+internal sealed class LazyGatewayLifecycle(
+    Func<IGatewayLifecycle> create) : IGatewayLifecycle
+{
+    private IGatewayLifecycle? _value;
+
+    private IGatewayLifecycle Value => _value ??= create();
+
+    public Task<GatewayLifecycleStatus> GetStatusAsync(
+        CancellationToken cancellationToken) =>
+        Value.GetStatusAsync(cancellationToken);
+
+    public Task<GatewayLifecycleStartResult> StartAsync(
+        CancellationToken cancellationToken) =>
+        Value.StartAsync(cancellationToken);
+
+    public Task<GatewayStopResult> StopAsync(
+        CancellationToken cancellationToken) =>
+        Value.StopAsync(cancellationToken);
+}

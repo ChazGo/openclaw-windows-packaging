@@ -57,17 +57,18 @@ the read-only application directory the workspace.
 
 ### `clawctl`
 
-`clawctl` owns setup and the isolated-session operations:
+`clawctl` owns setup and routes management operations through the persisted
+gateway-isolation selection:
 
 | Command | Behavior |
 |---|---|
-| `clawctl setup` | Prepare the bundled Node.js runtime, confirm packaged `app\openclaw.mjs` exists, and provision or reuse the owned isolated session. It also configures gateway sign-in recovery without starting a gateway. |
-| `clawctl setup --fresh [--force]` | Remove this installation's owned session and package-local state, then run setup again. Without `--force`, incomplete external cleanup stops before local state is erased. `--force` is valid only with `--fresh`; it preserves an explicit warning when cleanup of owned external resources cannot be confirmed, but still stops if bounded local deletion fails. |
-| `clawctl status` | Report the recorded isolated-session state without changing it. Use `clawctl gateway-service status` to inspect the gateway. |
-| `clawctl teardown [--force]` | Stop and deprovision the owned session and remove its setup state. The MSIX remains installed. |
-| `clawctl pwsh` | Open an interactive PowerShell session inside the agent session. |
-| `clawctl collect-logs [--output <path>]` | Create a redacted host-and-agent diagnostics ZIP. |
-| `clawctl gateway-service start` | Start the OpenClaw gateway in the isolated session. Requires setup. |
+| `clawctl setup` | Enabled provisions or repairs the owned session and its agent runtime. Disabled prepares the package-managed signed-in-user Node.js runtime without probing or changing MXC. Both configure the same mode-aware sign-in recovery launcher without starting a gateway. |
+| `clawctl setup --fresh [--force]` | Reset resources owned by the selected mode, then run setup again. The persisted mode selection is retained. |
+| `clawctl status` | Report the selected mode plus its session/Gateway or signed-in-user runtime/Gateway state without provisioning or mutation. |
+| `clawctl teardown [--force]` | Remove resources owned by the selected mode while retaining the installed package and mode selection. |
+| `clawctl pwsh` | Enabled opens an interactive PowerShell session inside the agent session. Disabled fails with guidance to use ordinary PowerShell. |
+| `clawctl collect-logs [--output <path>]` | Enabled includes reachable guest diagnostics. Disabled includes signed-in-user Gateway/profile diagnostics and never attaches to a session. |
+| `clawctl gateway-service start` | Start the OpenClaw gateway in the selected isolated or signed-in-user runtime. Requires setup. |
 | `clawctl gateway-service status` | Inspect the gateway without starting it. |
 | `clawctl gateway-service stop` | Stop the gateway while retaining the session and its data. |
 | `clawctl --version` | Print the packaged launcher version. |
@@ -117,8 +118,9 @@ contains `mode`, `ownerSid`, and `updatedUtc`. A missing record defaults to
 required isolation; malformed, unsupported, or foreign-owner state stops the
 launch rather than routing directly. Unpackaged development launches remain
 direct by default and may use `OPENCLAW_SESSION`; installed launches do not
-allow that development override to contradict persisted state. This layer does
-not yet expose `clawctl` commands to change the selection.
+allow that development override to contradict persisted state. The existing command surface now obeys this selection consistently. The
+`clawctl gateway-isolation enable|disable|status` transition command is not
+introduced until Layer 4.
 
 The launcher places Node.js in a Windows job configured with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The launcher remains alive while Node.js
