@@ -251,4 +251,41 @@ public sealed class SessionCollectorTests : IDisposable
         Assert.False(File.Exists(Path.Combine(Destination, "config", "completions.ps1")));
         Assert.Equal(2, result.Entries!.Count);
     }
+
+    [Fact]
+    public void DirectoryEnumerationFailureIsReportedInsteadOfFailingCollection()
+    {
+        Directory.CreateDirectory(Path.Combine(Source, "logs"));
+        var request = new SessionCollectRequest
+        {
+            RequestId = "c1",
+            DestinationDirectory = Destination,
+            Sources = [new SessionCollectSource
+            {
+                RelativePath = "logs",
+                Name = "logs",
+                Recursive = true
+            }]
+        };
+        File.WriteAllText(RequestPath, SessionCollectProtocol.SerializeRequest(request));
+
+        int exitCode = SessionCollector.Run(
+            RequestPath,
+            File.ReadAllText,
+            File.WriteAllText,
+            Source,
+            (_, _, _) => ThrowDuringEnumeration());
+
+        Assert.Equal(0, exitCode);
+        SessionCollectResult result = SessionCollectProtocol.ReadResult(
+            File.ReadAllText(SessionLaunchProtocol.ResultPathFor(RequestPath)));
+        SessionCollectEntry entry = Assert.Single(result.Entries!);
+        Assert.False(entry.Copied);
+        Assert.StartsWith("unreadable:", entry.Detail, StringComparison.Ordinal);
+
+        static IEnumerable<string> ThrowDuringEnumeration()
+        {
+            throw new UnauthorizedAccessException("fixture access denied");
+        }
+    }
 }
