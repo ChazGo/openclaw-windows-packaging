@@ -45,6 +45,9 @@ internal sealed record SessionRecord
 
     [JsonPropertyName("createdUtc")]
     public DateTimeOffset CreatedUtc { get; init; }
+
+    [JsonPropertyName("supersededSandboxId")]
+    public string? SupersededSandboxId { get; init; }
 }
 
 /// <summary>
