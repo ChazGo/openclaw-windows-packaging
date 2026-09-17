@@ -64,7 +64,7 @@ function invokeRoute(route) {
 
 function runThemeBridge(html) {
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-  assert.equal(scripts.length, 1);
+  assert.ok(scripts.length >= 1);
   const properties = new Map();
   const root = {
     dataset: {},
@@ -110,7 +110,7 @@ function assertInformationalPage(html) {
   assert.match(html, /<dt>Gateway<\/dt>\s*<dd><span class="status status--ok">Running<\/span><\/dd>/);
   assert.doesNotMatch(
     html,
-    /<button|<input|<select|<form|<code|clipboard|execCommand|getSelection|createRange|aria-live|copy-status|Change with CLI|clawctl|--no-isolation|Disabled|Not running|--button-bg|--font-mono|--focus/i,
+    /<input|<select|<form|Change with CLI|--no-isolation|Disabled|Not running|clawctl gateway isolation|fetch\(|XMLHttpRequest|WebSocket/i,
   );
 }
 
@@ -152,7 +152,126 @@ test("renders only informational running and active status", () => {
   assertInformationalPage(html);
   assert.match(html, /<dt>Isolation<\/dt>\s*<dd><span class="status status--ok">Active<\/span><\/dd>/);
   assert.match(html, /This Gateway is running in Windows isolation\./);
-  assert.doesNotMatch(html, /Invalid|unavailable/);
+  assert.doesNotMatch(html, />Invalid<|Isolation status is unavailable/);
+});
+
+const expectedCommands = [
+  ["Terminal UI", "openclaw tui"],
+  ["Gateway status", "clawctl gateway-service status"],
+  ["Restart Gateway", "clawctl gateway-service stop && clawctl gateway-service start"],
+  ["OpenClaw help", "openclaw --help"],
+  ["Launcher help", "clawctl --help"],
+];
+
+test("offers only supported general commands with individually named copy controls", () => {
+  const html = renderGatewayIsolationPage("enabled");
+  const commands = [...html.matchAll(/<code id="([^"]+)">([^<]+)<\/code>/g)];
+  assert.deepEqual(commands.map(match => match[2].replaceAll("&amp;", "&")), expectedCommands.map(([, command]) => command));
+  assert.equal([...html.matchAll(/<button /g)].length, expectedCommands.length);
+  for (const [index, [title]] of expectedCommands.entries()) {
+    assert.ok(html.includes(`data-copy-command="${commands[index][1]}" data-command-title="${title}" aria-label="Copy ${title} command"`));
+  }
+  assert.match(html, /PowerShell 7 on the Gateway host/);
+  assert.match(html, /This page never runs commands/);
+  assert.match(html, /only if stopping succeeds/);
+  assert.match(html, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(html, /button:focus-visible/);
+  assert.match(html, /@media \(max-width: 620px\)/);
+  assert.doesNotMatch(html, /clawctl tui|clawctl tty|gateway-service restart|help --all|--help --all/);
+});
+
+function runCopyScript({ legacy = true, selectionAvailable = true, modern = "missing" } = {}) {
+  const html = renderGatewayIsolationPage("enabled");
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.equal(scripts.length, 2);
+  const feedback = { textContent: "" };
+  const commands = [...html.matchAll(/<code id="([^"]+)">([^<]+)<\/code>/g)].map(match => ({
+    id: match[1], textContent: match[2].replaceAll("&amp;", "&"),
+  }));
+  const buttons = commands.map((command, index) => ({
+    dataset: { copyCommand: command.id, commandTitle: expectedCommands[index][0] },
+    addEventListener(event, handler) {
+      assert.equal(event, "click");
+      this.click = handler;
+    },
+  }));
+  let selected;
+  const calls = [];
+  const selection = {
+    rangeCount: 0,
+    removeAllRanges() { selected = undefined; },
+    addRange(range) { selected = range.command; },
+  };
+  vm.runInNewContext(scripts[1][1], {
+    document: {
+      getElementById(id) { return id === "copy-status" ? feedback : commands.find(command => command.id === id); },
+      querySelectorAll(selector) {
+        assert.equal(selector, "[data-copy-command]");
+        return buttons;
+      },
+      createRange() { return { selectNodeContents(command) { this.command = command; } }; },
+      execCommand(command) {
+        assert.equal(command, "copy");
+        calls.push(["legacy", selected.textContent]);
+        if (legacy === "throw") throw new Error("Copy denied");
+        return legacy;
+      },
+    },
+    window: { getSelection() { return selectionAvailable ? selection : null; } },
+    navigator: modern === "missing" ? {} : {
+      clipboard: {
+        async writeText(text) {
+          calls.push(["modern", text]);
+          if (modern === "reject") throw new Error("Permission denied");
+        },
+      },
+    },
+  });
+  return { buttons, feedback, calls, get selected() { return selected; } };
+}
+
+test("copies every exact command synchronously and announces only successful copies", async () => {
+  const copy = runCopyScript();
+  for (const [index, [title, command]] of expectedCommands.entries()) {
+    await copy.buttons[index].click();
+    assert.equal(copy.feedback.textContent, `Copied ${title} command.`);
+    assert.deepEqual(copy.calls.at(-1), ["legacy", command]);
+    assert.equal(copy.selected, undefined);
+  }
+});
+
+for (const legacy of [false, "throw"]) {
+  test(`uses Clipboard API when legacy copy returns ${legacy}`, async () => {
+    const copy = runCopyScript({ legacy, modern: "success" });
+    await copy.buttons[2].click();
+    assert.equal(copy.feedback.textContent, "Copied Restart Gateway command.");
+    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[2][1]]);
+  });
+  for (const modern of ["missing", "reject"]) {
+    test(`offers selected manual copy when legacy=${legacy} and modern=${modern}`, async () => {
+      const copy = runCopyScript({ legacy, modern });
+      for (const index of [0, 2, 0]) {
+        await copy.buttons[index].click();
+        assert.equal(copy.feedback.textContent, `Copy unavailable. ${expectedCommands[index][0]} command selected; press Ctrl+C to copy.`);
+        assert.equal(copy.selected.textContent, expectedCommands[index][1]);
+        assert.doesNotMatch(copy.feedback.textContent, /Copied/);
+      }
+    });
+  }
+}
+
+test("reports inability to select or copy without claiming manual selection succeeded", async () => {
+  const copy = runCopyScript({ selectionAvailable: false });
+  await copy.buttons[0].click();
+  assert.equal(copy.feedback.textContent, "Could not copy Terminal UI command. Select the command and copy it manually.");
+  assert.equal(copy.selected, undefined);
+});
+
+test("can use Clipboard API without DOM selection support", async () => {
+  const copy = runCopyScript({ selectionAvailable: false, modern: "success" });
+  await copy.buttons[0].click();
+  assert.equal(copy.feedback.textContent, "Copied Terminal UI command.");
+  assert.deepEqual(copy.calls, [["modern", "openclaw tui"]]);
 });
 
 test("applies recognized host theme tokens from the parent frame", () => {
@@ -192,7 +311,10 @@ test("applies recognized host theme tokens from the parent frame", () => {
   assert.equal(bridge.properties.get("--radius-full"), "9999px");
   assert.equal(bridge.properties.get("--font-body"), "Georgia, serif");
   assert.match(bridge.properties.get("--ok-bg"), /#44cc77 18%, #202020/);
-  for (const unused of ["--button-bg", "--focus", "--font-mono", "--warn-text", "--warn-bg"]) {
+  assert.equal(bridge.properties.get("--button-bg"), "#303030");
+  assert.equal(bridge.properties.get("--focus"), "#55aaff");
+  assert.equal(bridge.properties.get("--font-mono"), "Consolas, monospace");
+  for (const unused of ["--warn-text", "--warn-bg"]) {
     assert.equal(bridge.properties.has(unused), false);
   }
 
@@ -324,7 +446,7 @@ for (const mode of invalidModes) {
     assert.match(response.body, /<dt>Isolation<\/dt>\s*<dd><span class="status status--neutral">Invalid<\/span><\/dd>/);
     assert.doesNotMatch(
       response.body,
-      />Active<|status--warn|<script>alert/,
+      />Active<|status--warn|<script>alert|<button|<code|clipboard|execCommand|getSelection|createRange|aria-live|id="copy-status"|clawctl|Command reference/,
     );
     const bridge = runThemeBridge(response.body);
     bridge.listener({

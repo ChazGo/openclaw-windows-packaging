@@ -1,18 +1,53 @@
 const ISOLATION_ENVIRONMENT_VARIABLE = "CLAWCTL_GATEWAY_ISOLATION";
 const STATUS_PATH = "/plugins/gateway-isolation/status";
 const THEME_MESSAGE_TYPE = "openclaw:widget-theme";
+const COMMAND_REFERENCES = [
+  {
+    id: "terminal",
+    title: "Terminal UI",
+    description: "Open an interactive terminal UI connected to the Gateway.",
+    command: "openclaw tui",
+  },
+  {
+    id: "gateway-status",
+    title: "Gateway status",
+    description: "Inspect this installation's background Gateway without changing it.",
+    command: "clawctl gateway-service status",
+  },
+  {
+    id: "gateway-restart",
+    title: "Restart Gateway",
+    description: "Stop the background Gateway, then start it only if stopping succeeds. Keeps the session and its data.",
+    command: "clawctl gateway-service stop && clawctl gateway-service start",
+  },
+  {
+    id: "openclaw-help",
+    title: "OpenClaw help",
+    description: "List top-level OpenClaw commands. Add --help to a subcommand for details.",
+    command: "openclaw --help",
+  },
+  {
+    id: "launcher-help",
+    title: "Launcher help",
+    description: "List ClawCtl commands for managing this installation.",
+    command: "clawctl --help",
+  },
+];
 const THEME_BRIDGE_SCRIPT = `<script>
   const themeTokenProperties = {
     surface: "--bg",
     card: "--card",
+    elevated: "--button-bg",
     text: "--text",
     "text-strong": "--text-strong",
     muted: "--muted",
     border: "--border",
+    accent: "--focus",
     ok: "--ok-text",
     radius: "--radius",
     "radius-full": "--radius-full",
     "font-body": "--font-body",
+    "font-mono": "--font-mono",
   };
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return;
@@ -42,6 +77,80 @@ const THEME_BRIDGE_SCRIPT = `<script>
     }
   });
 </script>`;
+const COPY_COMMAND_SCRIPT = `<script>
+  let copyRequest = 0;
+  const feedback = document.getElementById("copy-status");
+  for (const button of document.querySelectorAll("[data-copy-command]")) {
+    button.addEventListener("click", async () => {
+      const request = ++copyRequest;
+      const command = document.getElementById(button.dataset.copyCommand);
+      const title = button.dataset.commandTitle;
+      let copied = false;
+      let selected = false;
+      let selection;
+      const previousRanges = [];
+      feedback.textContent = "";
+      // Copy synchronously while the click has user activation. The opaque
+      // sandbox cannot rely on permission to use the async Clipboard API.
+      try {
+        selection = window.getSelection();
+        for (let i = 0; i < selection.rangeCount; i++) {
+          previousRanges.push(selection.getRangeAt(i).cloneRange());
+        }
+        const range = document.createRange();
+        range.selectNodeContents(command);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        selected = true;
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
+      if (!copied) {
+        try {
+          await navigator.clipboard.writeText(command.textContent);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+      if (request !== copyRequest) return;
+      if (copied) {
+        if (selected) {
+          selection.removeAllRanges();
+          for (const range of previousRanges) selection.addRange(range);
+        }
+        feedback.textContent = "Copied " + title + " command.";
+      } else {
+        feedback.textContent = selected
+          ? "Copy unavailable. " + title + " command selected; press Ctrl+C to copy."
+          : "Could not copy " + title + " command. Select the command and copy it manually.";
+      }
+    });
+  }
+</script>`;
+
+function renderCommandReferences() {
+  const rows = COMMAND_REFERENCES.map(({ id, title, description, command }) => `
+      <div class="command-row">
+        <div>
+          <h3>${title}</h3>
+          <p class="command-description">${description}</p>
+        </div>
+        <div class="command">
+          <code id="command-${id}">${command.replaceAll("&", "&amp;")}</code>
+          <button type="button" data-copy-command="command-${id}" data-command-title="${title}" aria-label="Copy ${title} command">Copy</button>
+        </div>
+      </div>`).join("");
+  return `
+    <section aria-labelledby="commands-title">
+      <h2 id="commands-title">Command reference</h2>
+      <p class="intro">Copy a command to run yourself in PowerShell 7 on the Gateway host. This page never runs commands.</p>
+      <div class="status-section">${rows}
+      </div>
+      <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
+    </section>`;
+}
 
 export function readGatewayIsolationMode(env) {
   const value = env[ISOLATION_ENVIRONMENT_VARIABLE];
@@ -70,6 +179,7 @@ function renderStatusPage(enabled) {
     :root {
       color-scheme: light dark;
       --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Liberation Mono", monospace;
       --radius: 10px;
       --radius-full: 9999px;
       --bg: #ffffff;
@@ -80,6 +190,8 @@ function renderStatusPage(enabled) {
       --muted: #59636e;
       --ok-bg: #dafbe1;
       --ok-text: #116329;
+      --button-bg: #f6f8fa;
+      --focus: #0969da;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -91,6 +203,8 @@ function renderStatusPage(enabled) {
         --muted: #8b949e;
         --ok-bg: #12261e;
         --ok-text: #56d364;
+        --button-bg: #21262d;
+        --focus: #58a6ff;
       }
     }
     * { box-sizing: border-box; }
@@ -150,11 +264,47 @@ function renderStatusPage(enabled) {
     }
     .status--ok { color: var(--ok-text); background: var(--ok-bg); }
     .status--neutral { color: var(--muted); }
+    h2 { margin: 28px 0 8px; color: var(--text-strong); font-size: 17px; }
+    h3 { margin: 0; color: var(--text-strong); font-size: 14px; font-weight: 600; }
+    .command-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr);
+      align-items: center;
+      gap: 20px;
+      padding: 16px 18px;
+    }
+    .command-row + .command-row { border-top: 1px solid var(--border); }
+    .command-description { margin: 5px 0 0; color: var(--muted); line-height: 1.45; }
+    .command {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+    code { flex: 1; min-width: 0; overflow-wrap: anywhere; font: 13px/1.5 var(--font-mono); }
+    button {
+      flex: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 7px 10px;
+      background: var(--button-bg);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover { border-color: var(--text); }
+    button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .copy-status { min-height: 1.5em; margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
     @media (max-width: 620px) {
       main { padding: 16px; }
       .status-row { grid-template-columns: 1fr; gap: 12px; }
       dd { justify-self: start; }
       .status { width: fit-content; }
+      .command-row { grid-template-columns: 1fr; gap: 12px; }
     }
   </style>
 </head>
@@ -172,8 +322,10 @@ function renderStatusPage(enabled) {
         <dd><span class="status status--${enabled ? "ok" : "neutral"}">${enabled ? "Active" : "Invalid"}</span></dd>
       </div>
     </dl>
+    ${enabled ? renderCommandReferences() : ""}
   </main>
   ${THEME_BRIDGE_SCRIPT}
+  ${enabled ? COPY_COMMAND_SCRIPT : ""}
 </body>
 </html>`;
 }
