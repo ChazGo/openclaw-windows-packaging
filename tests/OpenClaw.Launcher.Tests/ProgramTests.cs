@@ -1,5 +1,5 @@
-using OpenClaw.Launcher.Gateway;
 using OpenClaw.Launcher.Mxc;
+using OpenClaw.Launcher.Gateway;
 using OpenClaw.Launcher.Session;
 using OpenClaw.Launcher.Tests.Session;
 using OpenClaw.SessionProtocol;
@@ -10,7 +10,6 @@ public sealed class ProgramTests : IDisposable
 {
     private readonly string _testDirectory = TestDirectory.Create();
     private FakeMxcSessionClient? _lastSessionBackend;
-    private string? _sessionStatePath;
 
     [Fact]
     public async Task AgentLaunchResolvesNodeAndRunsPackagedApplication()
@@ -61,22 +60,19 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task SetupPreparesNodeAndChecksPackagedApplication()
+    public async Task SetupReportsAnUnavailableIsolatedSessionWithoutResolvingHostNode()
     {
         string applicationDirectory = Path.Combine(_testDirectory, "app");
         Directory.CreateDirectory(applicationDirectory);
         string entryPoint = Path.Combine(applicationDirectory, "openclaw.mjs");
         await File.WriteAllTextAsync(entryPoint, "console.log('fixture');");
-        string archivePath = Path.Combine(_testDirectory, "node-v24.15.0-win-x64.zip");
-        await File.WriteAllTextAsync(archivePath, "fixture");
         DateTime lastWriteTime = File.GetLastWriteTimeUtc(entryPoint);
-        var options = new HostOptions(applicationDirectory, archivePath, []);
+        var options = new HostOptions(applicationDirectory, null, []);
         var nodeRuntime = new NodeRuntime(
             Path.Combine(_testDirectory, "node.exe"),
             new Version(24, 15, 0),
             System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
         using var output = new StringWriter();
-        SessionRuntime runtime = CreateSessionRuntime();
 
         int exitCode = await Program.RunControlAsync(
             options,
@@ -84,13 +80,9 @@ public sealed class ProgramTests : IDisposable
             _ => { },
             output,
             TextWriter.Null,
-            _ => Task.FromResult(nodeRuntime),
-            _ => runtime,
-            installRecovery: RecoveryConfigured,
-            probeReadiness: SupportedHost,
-            getPackageFamilyName: () => "OpenClaw.Gateway_test");
+            _ => Task.FromResult(nodeRuntime));
 
-        Assert.Equal(0, exitCode);
+        Assert.Equal(1, exitCode);
         Assert.True(File.Exists(entryPoint));
         Assert.Equal(lastWriteTime, File.GetLastWriteTimeUtc(entryPoint));
         Assert.DoesNotContain(
@@ -101,34 +93,19 @@ public sealed class ProgramTests : IDisposable
             applicationDirectory,
             output.ToString(),
             StringComparison.Ordinal);
-        SetupRecord setup = runtime.SetupState.Read(runtime.ApplicationId).Record!;
-        Assert.Equal(SetupPhase.Ready, setup.Phase);
-        Assert.True(setup.StartupEnabled);
-        Assert.Equal("24.15.0", setup.AgentNodeVersion);
         Assert.Contains(
-            _lastSessionBackend!.Calls,
-            call => call.StartsWith("execute:", StringComparison.Ordinal));
-        Assert.DoesNotContain(
-            _lastSessionBackend.Calls,
-            call => call.StartsWith("execute-attached:", StringComparison.Ordinal));
+            "requires isolated-session support",
+            output.ToString(),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task AgentUsesTheRuntimeInstalledForTheSessionWithoutHostFallback()
     {
-        string applicationDirectory = Path.Combine(_testDirectory, "app");
-        Directory.CreateDirectory(applicationDirectory);
-        await File.WriteAllTextAsync(
-            Path.Combine(applicationDirectory, "openclaw.mjs"),
-            "console.log('fixture');");
-        string archivePath = Path.Combine(_testDirectory, "node-v24.15.0-win-x64.zip");
-        await File.WriteAllTextAsync(archivePath, "fixture");
-        var options = new HostOptions(applicationDirectory, archivePath, ["gateway"]);
-        var hostNode = new NodeRuntime(
-            Path.Combine(_testDirectory, "host-node.exe"),
-            new Version(24, 15, 0),
-            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        HostOptions options = CreateSetupOptions(applicationDirectory);
         SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime) { TeardownSucceeds = true };
 
         int setupExitCode = await Program.RunControlAsync(
             options,
@@ -136,13 +113,7 @@ public sealed class ProgramTests : IDisposable
             _ => { },
             TextWriter.Null,
             TextWriter.Null,
-            _ => Task.FromResult(hostNode),
-            _ => runtime,
-            // Setup only reaches Ready once logon recovery is configured, and
-            // a test must never register a real scheduled task.
-            installRecovery: RecoveryConfigured,
-            probeReadiness: SupportedHost,
-            getPackageFamilyName: () => "OpenClaw.Gateway_test");
+            installationLifecycle: lifecycle);
         Assert.Equal(0, setupExitCode);
 
         string expectedAgentNode = runtime.SetupState
@@ -188,14 +159,153 @@ public sealed class ProgramTests : IDisposable
         Assert.False(directLaunchAttempted);
     }
 
+    [Theory]
+    [InlineData("corrupt")]
+    [InlineData("foreign")]
+    [InlineData("mismatched")]
+    public async Task AutomaticHostFallbackRefusesSavedOwnershipFailures(
+        string stateKind)
+    {
+        SessionRuntime runtime = CreateSessionRuntime();
+        string applicationDirectory = Path.Combine(_testDirectory, "fallback-app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(applicationDirectory, "openclaw.mjs"),
+            "fixture").ConfigureAwait(true);
+        Directory.CreateDirectory(Path.GetDirectoryName(runtime.Paths.SessionStatePath)!);
+        SessionRecord session = new()
+        {
+            ApplicationId = runtime.ApplicationId,
+            SandboxId = "iso:saved",
+            WorkspacePath = Path.Combine(_testDirectory, "workspace"),
+            Generation = "test-generation",
+            CreatedUtc = DateTimeOffset.UtcNow
+        };
+        Directory.CreateDirectory(session.WorkspacePath!);
+
+        switch (stateKind)
+        {
+            case "corrupt":
+                await File.WriteAllTextAsync(
+                    runtime.Paths.SessionStatePath,
+                    "{ not json").ConfigureAwait(true);
+                break;
+            case "foreign":
+                await File.WriteAllTextAsync(
+                    runtime.Paths.SessionStatePath,
+                    """
+                    {"schemaVersion":1,"sandboxId":"iso:foreign","applicationId":"PFN:Other","createdUtc":"2026-01-01T00:00:00Z"}
+                    """).ConfigureAwait(true);
+                break;
+            default:
+                new SessionStateStore(runtime.Paths.SessionStatePath).Write(session);
+                runtime.SetupState.Write(new SetupRecord
+                {
+                    ApplicationId = runtime.ApplicationId,
+                    SandboxId = "iso:different",
+                    Phase = SetupPhase.Ready
+                });
+                break;
+        }
+
+        bool hostPrepared = false;
+        bool hostLaunched = false;
+
+        await Assert.ThrowsAsync<SessionException>(() => Program.RunAgentAsync(
+            new HostOptions(applicationDirectory, null, ["--version"]),
+            _ => { },
+            _ =>
+            {
+                hostPrepared = true;
+                return Task.FromResult(new NodeRuntime(
+                    "node.exe",
+                    new Version(24, 0),
+                    System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture));
+            },
+            (_, _, _, _, _, _) =>
+            {
+                hostLaunched = true;
+                return Task.FromResult(0);
+            },
+            _ => runtime,
+            _ => Task.FromResult(new MxcReadinessReport(
+                null,
+                null,
+                "backend unavailable",
+                MxcHostSupport.Unsupported,
+                null,
+                MxcSupportEvidence.HostBuild)),
+            () => runtime.Paths.PackageFamilyName,
+            _ => null));
+
+        Assert.False(hostPrepared);
+        Assert.False(hostLaunched);
+    }
+
+    [Fact]
+    public async Task AutomaticHostFallbackDoesNotCreateASessionRuntimeWithoutPackageIdentity()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, "unpackaged-app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(applicationDirectory, "openclaw.mjs"),
+            "fixture").ConfigureAwait(true);
+        bool runtimeCreated = false;
+
+        int exitCode = await Program.RunAgentAsync(
+            new HostOptions(applicationDirectory, null, ["--version"]),
+            _ => { },
+            _ => Task.FromResult(new NodeRuntime(
+                "node.exe",
+                new Version(24, 0),
+                System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture)),
+            (_, _, _, _, _, _) => Task.FromResult(17),
+            createSessionRuntime: _ =>
+            {
+                runtimeCreated = true;
+                return CreateSessionRuntime();
+            },
+            probeReadiness: _ => Task.FromResult(new MxcReadinessReport(
+                null,
+                null,
+                "backend unavailable",
+                MxcHostSupport.Unsupported,
+                null,
+                MxcSupportEvidence.HostBuild)),
+            getPackageFamilyName: () => null,
+            readEnvironmentVariable: _ => null);
+
+        Assert.False(runtimeCreated);
+        Assert.Equal(17, exitCode);
+    }
+
+    [Fact]
+    public void SavedSessionWithoutSetupExplainsTheRequiredRecoveryCommand()
+    {
+        SessionRuntime runtime = CreateSessionRuntime();
+        new SessionStateStore(runtime.Paths.SessionStatePath).Write(new SessionRecord
+        {
+            ApplicationId = runtime.ApplicationId,
+            SandboxId = "iso:saved",
+            WorkspacePath = Path.Combine(_testDirectory, "workspace"),
+            Generation = "test-generation",
+            CreatedUtc = DateTimeOffset.UtcNow
+        });
+
+        SessionException exception = Assert.Throws<SessionException>(
+            runtime.ValidateSavedOwnershipForHostFallback);
+
+        Assert.Contains("clawctl setup", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task AgentRefusesForeignSessionRecordWithoutHostFallback()
     {
         SessionRuntime runtime = await SetUpSessionAsync();
         var directLaunches = new List<string>();
-        SessionRecord record = new SessionStateStore(_sessionStatePath!)
+        SessionRecord record = new SessionStateStore(runtime.Paths.SessionStatePath)
             .Read(runtime.ApplicationId).Record!;
-        new SessionStateStore(_sessionStatePath!).Write(record with
+        new SessionStateStore(runtime.Paths.SessionStatePath).Write(record with
         {
             SandboxId = SandboxIdFor("PFN:Some.Other.App_abc123")
         });
@@ -212,9 +322,9 @@ public sealed class ProgramTests : IDisposable
     {
         SessionRuntime runtime = await SetUpSessionAsync();
         var directLaunches = new List<string>();
-        SessionRecord record = new SessionStateStore(_sessionStatePath!)
+        SessionRecord record = new SessionStateStore(runtime.Paths.SessionStatePath)
             .Read(runtime.ApplicationId).Record!;
-        new SessionStateStore(_sessionStatePath!).Write(record with
+        new SessionStateStore(runtime.Paths.SessionStatePath).Write(record with
         {
             SandboxId = SandboxIdFor("PFN:Some.Other.App_abc123")
         });
@@ -257,7 +367,7 @@ public sealed class ProgramTests : IDisposable
     {
         SessionRuntime runtime = await SetUpSessionAsync();
         var directLaunches = new List<string>();
-        await File.WriteAllTextAsync(_sessionStatePath!, "{ not json");
+        await File.WriteAllTextAsync(runtime.Paths.SessionStatePath, "{ not json");
 
         SessionException failure = await Assert.ThrowsAsync<SessionException>(
             () => RunAgentWithDirectLaunchProbeAsync(runtime, directLaunches));
@@ -308,17 +418,405 @@ public sealed class ProgramTests : IDisposable
             _ => { },
             TextWriter.Null,
             error,
-            createSessionRuntime: _ => runtime);
+            installationLifecycle: new FailingFreshLifecycle(runtime));
 
         Assert.Equal(1, exitCode);
         Assert.Contains("--force", error.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            _lastSessionBackend!.Calls,
-            call => call.StartsWith("deprovision:", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("--no-isolation", null)]
+    [InlineData(null, "0")]
+    public async Task FreshSetupRejectsDisabledIsolationBeforePreparingTheHostRuntime(
+        string? option,
+        string? sessionMode)
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        using var output = new StringWriter();
+        string[] arguments = option is null
+            ? ["setup", "--fresh"]
+            : ["setup", "--fresh", option];
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            arguments,
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            readEnvironmentVariable: name =>
+                name == SessionRoutingPolicy.ModeVariable ? sessionMode : null);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(lifecycle.Calls);
+        Assert.Contains("--fresh requires isolated-session provisioning", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SetupReportsMissingApplicationBeforeResolvingNode()
+    public async Task FreshSetupStopsBeforeClearingStateWhenTeardownFails()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, "app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), "fixture");
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime());
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(["validate", "lock", "recovery", "gateway", "session"], lifecycle.Calls);
+        Assert.False(lifecycle.Cleaner.Cleared);
+        Assert.Contains("Pre-reset diagnostic report:", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("teardown is incomplete", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FreshSetupResetsInOrderBeforeProvisioningAndRecordsConsistentNewState()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime) { TeardownSucceeds = true };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.True(exitCode == 0, output.ToString());
+        Assert.Equal(
+            ["validate", "lock", "recovery", "gateway", "session", "clean"],
+            lifecycle.Calls);
+        Assert.Equal(SetupPhase.Ready, runtime.SetupState.Read(runtime.ApplicationId).Record!.Phase);
+        Assert.NotNull(runtime.Coordinator.GetRecordedStatus().Record);
+        Assert.Contains(
+            ((FakeMxcSessionClient)runtime.Backend).Calls,
+            call => call.StartsWith("execute:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            ((FakeMxcSessionClient)runtime.Backend).Calls,
+            call => call.StartsWith("execute-attached:", StringComparison.Ordinal));
+        Assert.Contains("OpenClaw isolated session is ready.", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FreshSetupCleanerFailurePreventsProvisionAndReady()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        var lifecycle = new FailingFreshLifecycle(CreateSessionRuntime())
+        {
+            TeardownSucceeds = true,
+            CleanerException = new IOException("state file is locked")
+        };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh"], _ => { }, output, TextWriter.Null, installationLifecycle: lifecycle);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(["validate", "lock", "recovery", "gateway", "session", "clean"], lifecycle.Calls);
+        Assert.DoesNotContain(
+            "OpenClaw isolated session is ready.",
+            output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ForcedFreshSetupContinuesAfterUnresolvedOwnedCleanupAndKeepsTheWarning()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownResult = new TeardownResult(
+                Succeeded: false,
+                Message: "MXC backend is unavailable.",
+                Detail: "The owned sandbox record could not be verified.")
+        };
+        List<string> diagnostics = [];
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh", "--force"],
+            diagnostics.Add,
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.True(exitCode == 0, output.ToString());
+        Assert.Equal(["validate", "lock", "recovery", "gateway", "session", "clean"], lifecycle.Calls);
+        Assert.True(lifecycle.Cleaner.Cleared);
+        Assert.Equal(SetupPhase.Ready, runtime.SetupState.Read(runtime.ApplicationId).Record!.Phase);
+        Assert.Contains(
+            "did not prove a pristine machine",
+            output.ToString(),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            diagnostics,
+            text => text.Contains("did not prove a pristine machine", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ForcedFreshSetupContinuesWhenTeardownThrowsARecoverableFailure()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownException = new SessionStateException(
+                SessionStateFault.Unreadable,
+                "session.json cannot be read")
+        };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh", "--force"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.True(exitCode == 0, output.ToString());
+        Assert.True(lifecycle.Cleaner.Cleared);
+        Assert.Contains(
+            "session.json cannot be read",
+            output.ToString(),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "cannot remove resources whose ownership record was cleared",
+            output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FreshResetReportPreservesReadableResidualIdentityOutsideClearedState()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        const string oldSandboxId = "iso:residual-session";
+        new SessionStateStore(runtime.Paths.SessionStatePath).Write(new SessionRecord
+        {
+            SchemaVersion = SessionStateStore.CurrentSchemaVersion,
+            SandboxId = oldSandboxId,
+            ApplicationId = runtime.ApplicationId,
+            AgentUserName = "agent_old",
+            AgentUserSid = "S-1-5-21-0-0-0-1010",
+            WorkspacePath = Path.Combine(_testDirectory, "old-workspace"),
+            Generation = "test-generation",
+            CreatedUtc = DateTimeOffset.UtcNow
+        });
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownResult = new TeardownResult(false, "Backend unavailable.")
+        };
+        lifecycle.Cleaner.Cleanup = () => File.Delete(runtime.Paths.SessionStatePath);
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh", "--force"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.True(exitCode == 0, output.ToString());
+        string reportLine = output.ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Single(line => line.StartsWith("Pre-reset diagnostic report:", StringComparison.Ordinal));
+        string reportPath = reportLine["Pre-reset diagnostic report:".Length..].Trim();
+        try
+        {
+            string report = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains($"sessionSandboxId={oldSandboxId}", report, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(reportPath);
+        }
+    }
+
+    [Fact]
+    public async Task ForcedFreshSetupRecreatesDiagnosticsWithTheResidualWarning()
+    {
+        SessionRuntime runtime = CreateSessionRuntime();
+        string baseDirectory = Path.Combine(_testDirectory, "base");
+        string applicationDirectory = Path.Combine(baseDirectory, "app");
+        string runtimeDirectory = Path.Combine(baseDirectory, "runtime");
+        Directory.CreateDirectory(applicationDirectory);
+        Directory.CreateDirectory(runtimeDirectory);
+        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), "fixture");
+        await File.WriteAllTextAsync(
+            Path.Combine(runtimeDirectory, "node-v24.20.0-win-x64.zip"),
+            "fixture");
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownResult = new TeardownResult(false, "Owned backend cleanup remains unresolved.")
+        };
+        lifecycle.Cleaner.Cleanup = () => Directory.Delete(runtime.Paths.StateRoot, recursive: true);
+        string logPath = Path.Combine(runtime.Paths.StateRoot, "Logs", "openclaw.log");
+        using var diagnostics = HostDiagnosticLog.Create(logPath);
+        diagnostics.Write("Host started through the clawctl entrypoint.");
+        using var output = new StringWriter();
+        HostStartup startup = new()
+        {
+            Entrypoint = HostEntrypoint.Control,
+            CreateDiagnostics = () => diagnostics,
+            BaseDirectory = baseDirectory,
+            Output = output,
+            Error = TextWriter.Null,
+            InstallationLifecycle = lifecycle
+        };
+
+        int exitCode = await Program.RunAsync(["setup", "--fresh", "--force"], startup);
+
+        Assert.True(exitCode == 0, output.ToString());
+        string diagnosticsText = await File.ReadAllTextAsync(logPath);
+        Assert.Contains("did not prove a pristine machine", diagnosticsText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Host started through", diagnosticsText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ForcedFreshSetupStillStopsWhenLocalCleanupFails()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownResult = new TeardownResult(false, "Owned backend cleanup could not be confirmed."),
+            CleanerException = new UnauthorizedAccessException("state root is denied")
+        };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh", "--force"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(["validate", "lock", "recovery", "gateway", "session", "clean"], lifecycle.Calls);
+        Assert.Null(runtime.SetupState.Read(runtime.ApplicationId).Record);
+        Assert.DoesNotContain("isolated session is ready", output.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ForcedFreshSetupCancellationDoesNotClearOrProvision()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownException = new OperationCanceledException()
+        };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh", "--force"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(1, exitCode);
+        Assert.False(lifecycle.Cleaner.Cleared);
+        Assert.Null(runtime.SetupState.Read(runtime.ApplicationId).Record);
+        Assert.Contains("cancelled", output.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FreshSetupProvisionFailureDoesNotClaimReady()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        ((FakeMxcSessionClient)runtime.Backend).ExecuteBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                ((FakeMxcSessionClient)runtime.Backend).Metadata!.EphemeralWorkspacePath,
+                "runtime-*.json").Single();
+            SessionRuntimeInstallRequest request = SessionRuntimeProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionRuntimeProtocol.SerializeResult(new SessionRuntimeInstallResult
+                {
+                    RequestId = request.RequestId,
+                    Error = "installer failed"
+                }));
+            return Task.FromResult(new MxcExecutionResult(1, string.Empty, string.Empty));
+        };
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownSucceeds = true
+        };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh"], _ => { }, output, TextWriter.Null, installationLifecycle: lifecycle);
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(
+            ["validate", "lock", "recovery", "gateway", "session", "clean"],
+            lifecycle.Calls);
+        Assert.DoesNotContain("OpenClaw isolated session is ready.", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConcurrentFreshSetupReportsBusyWithoutStartingAnotherReset()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        FakeMxcSessionClient backend = (FakeMxcSessionClient)runtime.Backend;
+        var lifecycle = new FailingFreshLifecycle(runtime)
+        {
+            TeardownSucceeds = true,
+        };
+        backend.ExecuteBehavior = async _ =>
+        {
+            lifecycle.ProvisionStarted.TrySetResult();
+            await lifecycle.AllowProvision.Task.ConfigureAwait(false);
+            WriteRuntimeInstallResult(backend, 0);
+            return new MxcExecutionResult(0, string.Empty, string.Empty);
+        };
+        var firstOutput = new StringWriter();
+        Task<int> first = Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh"], _ => { }, firstOutput, TextWriter.Null, installationLifecycle: lifecycle);
+        await lifecycle.ProvisionStarted.Task
+            .WaitAsync(TimeSpan.FromSeconds(10))
+            .ConfigureAwait(true);
+        using var secondOutput = new StringWriter();
+
+        int second = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup", "--fresh"], _ => { }, secondOutput, TextWriter.Null, installationLifecycle: lifecycle);
+        lifecycle.AllowProvision.TrySetResult();
+
+        Assert.Equal(0, await first.ConfigureAwait(true));
+        firstOutput.Dispose();
+        Assert.Equal(1, second);
+        Assert.Equal(1, lifecycle.TeardownCount);
+        Assert.Contains("Another OpenClaw process", secondOutput.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SetupReportsMissingApplicationBeforeResolvingHostNode()
     {
         bool nodeResolutionAttempted = false;
 
@@ -344,108 +842,6 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task NoIsolationSetupPreparesTheHostRuntimeOnASupportedMachine()
-    {
-        string applicationDirectory = Path.Combine(_testDirectory, "app");
-        Directory.CreateDirectory(applicationDirectory);
-        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), "fixture");
-        bool resolvedNode = false;
-        using var output = new StringWriter();
-
-        int exitCode = await Program.RunControlAsync(
-            new HostOptions(applicationDirectory, "node.zip", []),
-            ["setup", "--no-isolation"],
-            _ => { },
-            output,
-            TextWriter.Null,
-            _ =>
-            {
-                resolvedNode = true;
-                return Task.FromResult(new NodeRuntime(
-                    "node.exe",
-                    new Version(24, 20, 0),
-                    System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture));
-            },
-            probeReadiness: _ => Task.FromResult(new MxcReadinessReport(
-                "runtime",
-                null,
-                null,
-                MxcHostSupport.Supported,
-                null,
-                MxcSupportEvidence.HostBuild)),
-            getPackageFamilyName: () => "OpenClaw.Gateway_test");
-
-        Assert.Equal(0, exitCode);
-        Assert.True(resolvedNode);
-        Assert.Contains("without isolated-session", output.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task NoIsolationSetupStillFailsOnAnUnsupportedMachine()
-    {
-        string applicationDirectory = Path.Combine(_testDirectory, "app");
-        Directory.CreateDirectory(applicationDirectory);
-        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), "fixture");
-        bool resolvedNode = false;
-
-        int exitCode = await Program.RunControlAsync(
-            new HostOptions(applicationDirectory, "node.zip", []),
-            ["setup", "--no-isolation"],
-            _ => { },
-            TextWriter.Null,
-            TextWriter.Null,
-            _ =>
-            {
-                resolvedNode = true;
-                return Task.FromResult(new NodeRuntime(
-                    "node.exe",
-                    new Version(24, 20, 0),
-                    System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture));
-            },
-            probeReadiness: _ => Task.FromResult(new MxcReadinessReport(
-                "runtime",
-                null,
-                null,
-                MxcHostSupport.Unsupported,
-                null,
-                MxcSupportEvidence.HostBuild,
-                null,
-                "Windows build does not support sessions.")),
-            getPackageFamilyName: () => "OpenClaw.Gateway_test");
-
-        Assert.Equal(1, exitCode);
-        Assert.False(resolvedNode);
-    }
-
-    [Fact]
-    public async Task TeardownClearsPendingGatewayStateAfterSessionRemoval()
-    {
-        SessionRuntime runtime = CreateSessionRuntime();
-        runtime.GatewayState.Write(new GatewayRecord
-        {
-            SchemaVersion = GatewayStateStore.CurrentSchemaVersion,
-            SandboxId = "iso:pending",
-            LaunchPending = true,
-            ProcessStartTimeUtc = DateTimeOffset.UtcNow
-        });
-
-        int exitCode = await Program.RunControlAsync(
-            new HostOptions(null, null, []),
-            ["teardown", "--force"],
-            _ => { },
-            TextWriter.Null,
-            TextWriter.Null,
-            createSessionRuntime: _ => runtime,
-            createTeardownOrchestrator: CreateTeardownOrchestrator);
-
-        Assert.Equal(0, exitCode);
-        GatewayStateResult state = runtime.GatewayState.Read();
-        Assert.Equal(GatewayStateFault.Missing, state.Fault);
-    }
-
-    // Preparing a runtime for an application that is not there wastes an
-    // extraction; the missing application is reported first.
-    [Fact]
     public async Task AgentReportsMissingApplicationBeforeResolvingHostNode()
     {
         bool nodeResolutionAttempted = false;
@@ -466,6 +862,121 @@ public sealed class ProgramTests : IDisposable
             }));
 
         Assert.False(nodeResolutionAttempted);
+    }
+
+    [Fact]
+    public async Task AutomaticAgentLaunchUsesHostOnlyWhenReadinessReportsIsolationUnsupported()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, "app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), string.Empty);
+        bool resolvedHostNode = false;
+        bool launchedHost = false;
+
+        int exitCode = await Program.RunAgentAsync(
+            new HostOptions(applicationDirectory, null, []),
+            _ => { },
+            _ =>
+            {
+                resolvedHostNode = true;
+                return Task.FromResult(new NodeRuntime(
+                    "node.exe",
+                    new Version(24, 0),
+                    System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture));
+            },
+            (_, _, _, _, _, _) =>
+            {
+                launchedHost = true;
+                return Task.FromResult(17);
+            },
+            probeReadiness: _ => Task.FromResult(new MxcReadinessReport(
+                "runtime",
+                null,
+                null,
+                MxcHostSupport.Unsupported,
+                null,
+                MxcSupportEvidence.HostBuild)),
+            getPackageFamilyName: () => "OpenClaw.Gateway_test",
+            readEnvironmentVariable: _ => null,
+            createSessionRuntime: _ => CreateSessionRuntime());
+
+        Assert.Equal(17, exitCode);
+        Assert.True(resolvedHostNode);
+        Assert.True(launchedHost);
+    }
+
+    [Fact]
+    public async Task RequiredAgentLaunchFailsWhenReadinessReportsIsolationUnsupported()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, "app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), string.Empty);
+        bool resolvedHostNode = false;
+
+        await Assert.ThrowsAsync<SessionException>(() => Program.RunAgentAsync(
+            new HostOptions(applicationDirectory, null, []),
+            _ => { },
+            _ =>
+            {
+                resolvedHostNode = true;
+                return Task.FromResult(new NodeRuntime(
+                    "node.exe",
+                    new Version(24, 0),
+                    System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture));
+            },
+            (_, _, _, _, _, _) => Task.FromResult(0),
+            probeReadiness: _ => Task.FromResult(new MxcReadinessReport(
+                "runtime",
+                null,
+                null,
+                MxcHostSupport.Unsupported,
+                null,
+                MxcSupportEvidence.HostBuild)),
+            getPackageFamilyName: () => "OpenClaw.Gateway_test",
+            readEnvironmentVariable: name =>
+                name == SessionRoutingPolicy.ModeVariable ? "1" : null));
+
+        Assert.False(resolvedHostNode);
+    }
+
+    [Fact]
+    public async Task SelectedSessionFailureDoesNotResolveOrLaunchHostNode()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, "app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), string.Empty);
+        bool resolvedHostNode = false;
+        bool launchedHost = false;
+
+        await Assert.ThrowsAsync<SessionException>(() => Program.RunAgentAsync(
+            new HostOptions(applicationDirectory, null, []),
+            _ => { },
+            _ =>
+            {
+                resolvedHostNode = true;
+                return Task.FromResult(new NodeRuntime(
+                    "node.exe",
+                    new Version(24, 0),
+                    System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture));
+            },
+            (_, _, _, _, _, _) =>
+            {
+                launchedHost = true;
+                return Task.FromResult(0);
+            },
+            _ => throw new SessionException("setup failed"),
+            _ => Task.FromResult(new MxcReadinessReport(
+                "runtime",
+                null,
+                null,
+                MxcHostSupport.Supported,
+                null,
+                MxcSupportEvidence.HostBuild)),
+            () => "OpenClaw.Gateway_test",
+            _ => null));
+
+        Assert.False(resolvedHostNode);
+        Assert.False(launchedHost);
     }
 
     public void Dispose()
@@ -536,8 +1047,8 @@ public sealed class ProgramTests : IDisposable
     {
         string stateRoot = Path.Combine(_testDirectory, "state");
         string baseDirectory = Path.Combine(_testDirectory, "base");
-        string workspace = Path.Combine(_testDirectory, "workspace");
         Directory.CreateDirectory(baseDirectory);
+        string workspace = Path.Combine(_testDirectory, "workspace");
         Directory.CreateDirectory(workspace);
         string helperPath = SessionRuntime.ResolveHelperPath(baseDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(helperPath)!);
@@ -551,33 +1062,13 @@ public sealed class ProgramTests : IDisposable
         };
         backend.ExecuteBehavior = _ =>
         {
-            string requestPath = Directory.GetFiles(workspace, "runtime-*.json").Single();
-            SessionRuntimeInstallRequest request = SessionRuntimeProtocol.ReadRequest(
-                File.ReadAllText(requestPath));
-            File.WriteAllText(
-                SessionLaunchProtocol.ResultPathFor(requestPath),
-                SessionRuntimeProtocol.SerializeResult(new SessionRuntimeInstallResult
-                {
-                    RequestId = request.RequestId,
-                    ExecutablePath = Path.Combine(
-                        workspace,
-                        "AppData",
-                        "Local",
-                        "OpenClaw",
-                        "NodeJS",
-                        "node-v24.15.0-win-x64",
-                        "node.exe"),
-                    Version = "24.15.0",
-                    ArchiveName = "node-v24.15.0-win-x64.zip"
-                }));
+            WriteRuntimeInstallResult(backend, 0);
             return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
         };
         _lastSessionBackend = backend;
-        HostPaths paths = HostPaths.ForRoot(stateRoot, "OpenClaw.Gateway_test");
-        _sessionStatePath = paths.SessionStatePath;
         return SessionRuntime.Create(
-            paths,
-            () => throw new InvalidOperationException("The test supplies its backend."),
+            HostPaths.ForRoot(stateRoot, "OpenClaw.Gateway_test"),
+            () => throw new InvalidOperationException("The test backend must be supplied."),
             baseDirectory,
             _ => { },
             backend);
@@ -603,15 +1094,58 @@ public sealed class ProgramTests : IDisposable
                 "node.exe",
                 new Version(24, 15, 0),
                 System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture)),
-            createSessionRuntime: _ => runtime,
-            // Setup only reaches Ready once logon recovery is configured, and
-            // a test must never register a real scheduled task.
-            installRecovery: RecoveryConfigured,
-            probeReadiness: SupportedHost,
-            getPackageFamilyName: () => "OpenClaw.Gateway_test").ConfigureAwait(false);
+            new StubbedRecoveryLifecycle(runtime)).ConfigureAwait(false);
 
         Assert.Equal(0, exitCode);
         return runtime;
+    }
+
+    // Setup only reaches Ready once logon recovery is configured, and a test
+    // must never register a real scheduled task. Everything else is left to
+    // production behaviour so the fixture still exercises the real path.
+    private sealed class StubbedRecoveryLifecycle(SessionRuntime runtime)
+        : IInstallationLifecycle
+    {
+        private static readonly InstallationLifecycle Inner =
+            InstallationLifecycle.Production;
+
+        public SessionRuntime CreateRuntime(Action<string> log) => runtime;
+
+        public Task<SessionRoutingDecision> CheckSessionSupportAsync(
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new SessionRoutingDecision(
+                SessionRouting.Session,
+                "Test session support is available."));
+
+        public NodeRuntime PrepareHostRuntime(HostOptions options, Action<string> log) =>
+            Inner.PrepareHostRuntime(options, log);
+
+        public PackageRuntimeMetadata ValidatePackageRuntime(
+            HostOptions options, SessionRuntime sessionRuntime) =>
+            Inner.ValidatePackageRuntime(options, sessionRuntime);
+
+        public ISessionLockHandle AcquireLifecycleLock(SessionRuntime sessionRuntime) =>
+            Inner.AcquireLifecycleLock(sessionRuntime);
+
+        public Task<TeardownResult> TeardownAsync(
+            HostOptions options,
+            SessionRuntime sessionRuntime,
+            Action<string> log,
+            bool lockAlreadyHeld,
+            CancellationToken cancellationToken) =>
+            Inner.TeardownAsync(options, sessionRuntime, log, lockAlreadyHeld, cancellationToken);
+
+        public IInstallationStateCleaner CreateStateCleaner(SessionRuntime sessionRuntime) =>
+            Inner.CreateStateCleaner(sessionRuntime);
+
+        public Task<GatewayPersistenceInstallResult> InstallRecoveryAsync(
+            Action<string> log,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new GatewayPersistenceInstallResult(
+                GatewayPersistenceState.Ready,
+                GatewayPersistenceLane.TaskScheduler,
+                "Logon recovery is configured.",
+                Changed: true));
     }
 
     private static string SandboxIdFor(string applicationId) =>
@@ -650,6 +1184,24 @@ public sealed class ProgramTests : IDisposable
             getPackageFamilyName: () => "OpenClaw.Gateway_test");
     }
 
+    private static void WriteRuntimeInstallResult(FakeMxcSessionClient backend, int exitCode)
+    {
+        string requestPath = Directory.GetFiles(backend.Metadata!.EphemeralWorkspacePath, "runtime-*.json")
+            .Single();
+        SessionRuntimeInstallRequest request = SessionRuntimeProtocol.ReadRequest(
+            File.ReadAllText(requestPath));
+        File.WriteAllText(
+            SessionLaunchProtocol.ResultPathFor(requestPath),
+            SessionRuntimeProtocol.SerializeResult(new SessionRuntimeInstallResult
+            {
+                RequestId = request.RequestId,
+                ExecutablePath = @"C:\Users\agent_1\AppData\Local\OpenClawGatewayMSIX\agent-node\node.exe",
+                Version = "24.20.0",
+                ArchiveName = "node-v24.20.0-win-x64.zip",
+                Error = exitCode == 0 ? null : "installer failed"
+            }));
+    }
+
     private HostOptions CreateAgentOptions()
     {
         string applicationDirectory = Path.Combine(_testDirectory, "agent-app");
@@ -658,5 +1210,155 @@ public sealed class ProgramTests : IDisposable
             Path.Combine(applicationDirectory, "openclaw.mjs"),
             "console.log('fixture');");
         return new HostOptions(applicationDirectory, null, ["--version"]);
+    }
+
+    private async Task<string> CreateApplicationAsync()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, Guid.NewGuid().ToString("N"), "app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(Path.Combine(applicationDirectory, "openclaw.mjs"), "fixture")
+            .ConfigureAwait(false);
+        return applicationDirectory;
+    }
+
+    private HostOptions CreateSetupOptions(string applicationDirectory)
+    {
+        string archivePath = Path.Combine(_testDirectory, "node-v24.20.0-win-x64.zip");
+        File.WriteAllText(archivePath, "fixture");
+        return new HostOptions(applicationDirectory, archivePath, []);
+    }
+
+    private sealed class FailingFreshLifecycle : IInstallationLifecycle
+    {
+        private readonly SessionRuntime _runtime;
+
+        public FailingFreshLifecycle(SessionRuntime runtime)
+        {
+            _runtime = runtime;
+        }
+
+        public List<string> Calls { get; } = [];
+
+        public RecordingCleaner Cleaner { get; } = new();
+
+        public Exception? CleanerException { get; init; }
+
+        public Exception? TeardownException { get; init; }
+
+        public TeardownResult? TeardownResult { get; init; }
+
+        public bool TeardownSucceeds { get; init; }
+
+        public TaskCompletionSource ProvisionStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource AllowProvision { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int TeardownCount { get; private set; }
+
+        public SessionRuntime CreateRuntime(Action<string> log) => _runtime;
+
+        public Task<SessionRoutingDecision> CheckSessionSupportAsync(
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new SessionRoutingDecision(
+                SessionRouting.Session,
+                "The isolated-session runtime is available."));
+
+        public NodeRuntime PrepareHostRuntime(HostOptions options, Action<string> log) =>
+            new(
+                "node.exe",
+                new Version(24, 20, 0),
+                System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+
+        public PackageRuntimeMetadata ValidatePackageRuntime(
+            HostOptions options,
+            SessionRuntime runtime)
+        {
+            Calls.Add("validate");
+            return new PackageRuntimeMetadata("node.zip", new Version(24, 0), runtime.HelperPath);
+        }
+
+        public Task<TeardownResult> TeardownAsync(
+            HostOptions options,
+            SessionRuntime runtime,
+            Action<string> log,
+            bool lockAlreadyHeld,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add("recovery");
+            Calls.Add("gateway");
+            Calls.Add("session");
+            TeardownCount++;
+            Assert.True(lockAlreadyHeld);
+            if (TeardownException is not null)
+            {
+                throw TeardownException;
+            }
+
+            if (TeardownResult is not null)
+            {
+                return Task.FromResult(TeardownResult);
+            }
+
+            return Task.FromResult(TeardownSucceeds
+                ? new TeardownResult(Succeeded: true, Message: "Removed prior session.")
+                : new TeardownResult(Succeeded: false, Message: "Recovery removal failed."));
+        }
+
+        public ISessionLockHandle AcquireLifecycleLock(SessionRuntime runtime)
+        {
+            Calls.Add("lock");
+            if (Calls.Count(static call => call == "lock") > 1)
+            {
+                throw new SessionBusyException(TimeSpan.Zero);
+            }
+
+            return new RecordingLockHandle();
+        }
+
+        public IInstallationStateCleaner CreateStateCleaner(SessionRuntime runtime)
+        {
+            Calls.Add("clean");
+            Cleaner.Exception = CleanerException;
+            return Cleaner;
+        }
+
+        public Task<GatewayPersistenceInstallResult> InstallRecoveryAsync(
+            Action<string> log,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new GatewayPersistenceInstallResult(
+                GatewayPersistenceState.Ready,
+                GatewayPersistenceLane.TaskScheduler,
+                "ready",
+                false));
+    }
+
+    private sealed class RecordingCleaner : IInstallationStateCleaner
+    {
+        public bool Cleared { get; private set; }
+
+        public Exception? Exception { get; set; }
+
+        public Action? Cleanup { get; set; }
+
+        public void Clear()
+        {
+            if (Exception is not null)
+            {
+                throw Exception;
+            }
+
+            Cleared = true;
+            Cleanup?.Invoke();
+        }
+
+    }
+
+    private sealed class RecordingLockHandle : ISessionLockHandle
+    {
+        public void Dispose()
+        {
+        }
     }
 }

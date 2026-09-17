@@ -32,6 +32,11 @@ internal sealed partial class GatewayRuntime
 
     public string HelperPath { get; }
 
+    internal HostPaths Paths => _paths;
+
+    internal string? GetRecordedWorkspacePath() =>
+        _session.Coordinator.GetRecordedStatus().Record?.WorkspacePath;
+
     private SessionRuntime Session => _session;
 
     private static bool FileExists(string path) => File.Exists(path);
@@ -197,9 +202,7 @@ internal sealed partial class GatewayRuntime
                 applicationDirectory,
                 launch.Port)
             {
-                WorkingDirectory = launch.WorkingDirectory ?? sessionRecord.WorkspacePath
-                    ?? throw new SessionException(
-                        "The isolated session has no shared workspace for the gateway.")
+                WorkingDirectory = launch.WorkingDirectory
             });
         }
 

@@ -28,6 +28,7 @@ internal sealed class SessionRuntime
         IMxcSessionClient backend,
         string helperPath,
         string applicationId,
+        HostPaths paths,
         SetupStateStore setupState,
         GatewayStateStore gatewayState,
         string lifecycleLockScope)
@@ -37,6 +38,7 @@ internal sealed class SessionRuntime
         Backend = backend;
         HelperPath = helperPath;
         ApplicationId = applicationId;
+        Paths = paths;
         SetupState = setupState;
         GatewayState = gatewayState;
         LifecycleLock = new NamedSessionLock(lifecycleLockScope);
@@ -55,6 +57,8 @@ internal sealed class SessionRuntime
     public string HelperPath { get; }
 
     public string ApplicationId { get; }
+
+    public HostPaths Paths { get; }
 
     public SetupStateStore SetupState { get; }
 
@@ -138,6 +142,7 @@ internal sealed class SessionRuntime
             client,
             ResolveHelperPath(baseDirectory),
             applicationId,
+            paths,
             new SetupStateStore(paths.SetupStatePath),
             new GatewayStateStore(paths.GatewayStatePath),
             paths.SessionStatePath + "_Installation");
@@ -197,17 +202,56 @@ internal sealed class SessionRuntime
         return session.Record;
     }
 
+    /// <summary>
+    /// Validates local ownership before automatic host fallback.
+    /// </summary>
+    /// <remarks>
+    /// Automatic fallback is allowed only when this installation has no saved
+    /// session or setup state. A foreign, corrupt, or mismatched record is
+    /// evidence that replacement or recovery is required, not permission to
+    /// run the user's workload under a different profile. A session record
+    /// without its setup marker must be completed with <c>clawctl setup</c>.
+    /// </remarks>
     public void ValidateSavedOwnershipForHostFallback()
     {
-        SetupStateResult setup = SetupState.Read(ApplicationId);
         SessionStatus session = Coordinator.GetRecordedStatus();
-        if (setup.Fault == SetupStateFault.Missing &&
-            session.Availability == SessionAvailability.None)
+        SetupStateResult setup = SetupState.Read(ApplicationId);
+        if (session.Availability == SessionAvailability.None &&
+            setup.Fault == SetupStateFault.Missing)
         {
             return;
         }
 
-        RequireSetup();
+        if (session.Record is null)
+        {
+            throw new SessionException(
+                $"{session.Detail ?? "The saved isolated-session record could not be used."} " +
+                "Run `clawctl setup` to repair it.");
+        }
+
+        if (setup.Record is null)
+        {
+            throw new SessionException(
+                "The isolated session is recorded but explicit setup has not completed. " +
+                "Run `clawctl setup` before using automatic host fallback.");
+        }
+
+        if (setup.Record.Phase != SetupPhase.Ready)
+        {
+            throw new SessionException(
+                "The saved isolated-session setup is incomplete. " +
+                "Run `clawctl setup` before using automatic host fallback.");
+        }
+
+        if (!string.Equals(
+                setup.Record.SandboxId,
+                session.Record.SandboxId,
+                StringComparison.Ordinal))
+        {
+            throw new SessionException(
+                "The saved isolated-session records name different sessions. " +
+                "Run `clawctl setup` to reconcile them.");
+        }
     }
 
     /// <summary>
