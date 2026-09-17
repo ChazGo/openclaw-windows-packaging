@@ -9,6 +9,12 @@ const COMMAND_REFERENCES = [
     command: "clawctl pwsh",
   },
   {
+    id: "dashboard",
+    title: "Dashboard access",
+    description: "Show dashboard access details without opening a browser inside the agent session.",
+    command: "openclaw dashboard --no-open",
+  },
+  {
     id: "terminal",
     title: "Gateway chat TUI",
     description: "Chat with the Gateway in a terminal. This is not an agent shell.",
@@ -276,10 +282,10 @@ function renderStatusPage(enabled) {
       grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr);
       align-items: center;
       gap: 20px;
-      padding: 16px 18px;
+      padding: 12px 18px;
     }
     .command-row + .command-row { border-top: 1px solid var(--border); }
-    .command-description { margin: 5px 0 0; color: var(--muted); line-height: 1.45; }
+    .command-description { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
     .command {
       display: flex;
       align-items: center;

@@ -231,7 +231,7 @@ The live route establishes Gateway availability; disconnected-Gateway messaging
 belongs to the Control UI. There are no isolation controls.
 
 The active page also provides copy-only command references for `clawctl pwsh`,
-`openclaw tui`,
+`openclaw dashboard --no-open`, `openclaw tui`,
 `clawctl gateway-service status`, a PowerShell 7 restart sequence
 (`clawctl gateway-service stop && clawctl gateway-service start`),
 `openclaw --help`, and `clawctl --help`. The restart sequence manages this
@@ -247,6 +247,8 @@ configured agent session after setup, with `openclaw` and `node` on PATH; exit
 returns to the host. It prefers machine-wide PowerShell 7 and otherwise uses
 Windows PowerShell. Run ClawCtl from the host, not from inside that shell.
 `openclaw tui` is the Gateway chat terminal UI, not an agent shell.
+ClawCtl has no dashboard command. `openclaw dashboard --no-open` shows dashboard
+access details without trying to launch a browser inside the agent session.
 
 The report is captured once at plugin creation. It is a launcher-provided
 diagnostic, not independent isolation attestation. The launcher now requires an

@@ -160,6 +160,7 @@ test("renders one informational Gateway Isolation row with a single active badge
 
 const expectedCommands = [
   ["Agent session PowerShell", "clawctl pwsh"],
+  ["Dashboard access", "openclaw dashboard --no-open"],
   ["Gateway chat TUI", "openclaw tui"],
   ["Gateway status", "clawctl gateway-service status"],
   ["Restart Gateway", "clawctl gateway-service stop && clawctl gateway-service start"],
@@ -183,7 +184,7 @@ test("offers only supported general commands with individually named copy contro
   assert.match(html, /role="status" aria-live="polite" aria-atomic="true"/);
   assert.match(html, /button:focus-visible/);
   assert.match(html, /@media \(max-width: 620px\)/);
-  assert.doesNotMatch(html, /clawctl tui|clawctl tty|gateway-service restart|help --all|--help --all/);
+  assert.doesNotMatch(html, /clawctl tui|clawctl tty|clawctl dashboard|gateway-service restart|help --all|--help --all/);
 });
 
 function runCopyScript({ legacy = true, selectionAvailable = true, modern = "missing" } = {}) {
@@ -249,9 +250,9 @@ test("copies every exact command synchronously and announces only successful cop
 for (const legacy of [false, "throw"]) {
   test(`uses Clipboard API when legacy copy returns ${legacy}`, async () => {
     const copy = runCopyScript({ legacy, modern: "success" });
-    await copy.buttons[3].click();
+    await copy.buttons[4].click();
     assert.equal(copy.feedback.textContent, "Copied Restart Gateway command.");
-    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[3][1]]);
+    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[4][1]]);
   });
   for (const modern of ["missing", "reject"]) {
     test(`offers selected manual copy when legacy=${legacy} and modern=${modern}`, async () => {
