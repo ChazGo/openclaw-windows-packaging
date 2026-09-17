@@ -353,7 +353,12 @@ internal static class Program
                     await output.WriteLineAsync("OpenClaw isolated session was removed.")
                         .ConfigureAwait(false);
                     return 0;
-                }
+                },
+                PowerShell = cancellationToken => RunPowerShellAsync(
+                    options,
+                    GetSessionRuntime(),
+                    output,
+                    cancellationToken)
             });
 
         InvocationConfiguration configuration = new()
@@ -376,6 +381,65 @@ internal static class Program
             .Parse(args, ClawCtlCommandLine.CreateParserConfiguration())
             .InvokeAsync(configuration)
             .ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunPowerShellAsync(
+        HostOptions options,
+        Session.SessionRuntime runtime,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        Session.SessionRecord record = runtime.RequireSetup();
+        record = await runtime.Coordinator.StartRecordedAsync(cancellationToken)
+            .ConfigureAwait(false);
+        string helperPath = runtime.RequireStagedHelper(record);
+        string applicationDirectory = GetPackagedApplicationDirectory(options);
+        string agentNodePath = runtime.RequireAgentNodePath(
+            GetPackagedNodeArchivePath(options));
+        string nodeDirectory = Path.GetDirectoryName(agentNodePath)
+            ?? throw new Session.SessionException(
+                "The agent's Node.js runtime has no parent directory.");
+        SessionToolInstallResult installedTools = await runtime.Executor.InstallToolsAsync(
+            record,
+            helperPath,
+            cancellationToken).ConfigureAwait(false);
+        Session.AgentTools tools = new(
+            Path.GetDirectoryName(installedTools.ShimPath)
+                ?? throw new Session.SessionException(
+                    "The installed agent command shim has no parent directory."),
+            installedTools.ShimPath!);
+        Session.AgentShell shell = Session.AgentShellResolver.Resolve(File.Exists);
+
+        await output.WriteLineAsync(
+            $"Opening {shell.DisplayName} as {record.AgentUserName ?? "the agent account"} " +
+            "in the isolated session.").ConfigureAwait(false);
+        await output.WriteLineAsync(
+            "`openclaw` and `node` are on PATH; `clawctl` is not, because it " +
+            "manages this session from outside it.").ConfigureAwait(false);
+        await output.WriteLineAsync("Exit the shell to return.").ConfigureAwait(false);
+
+        return await runtime.Executor.ExecuteCommandAsync(
+            record,
+            new Session.SessionCommandRequest(
+                helperPath,
+                shell.ExecutablePath,
+                Session.AgentShellResolver.BuildArguments(
+                    record.WorkspacePath!,
+                    record.AgentUserName ?? "agent",
+                    tools.DirectoryPath,
+                    nodeDirectory),
+                record.WorkspacePath!)
+            {
+                AdditionalEnvironment = Session.SessionExecutor.MergeEnvironment(
+                    OpenClawRuntimeEnvironment.Build(
+                        WindowsHostConsole.Instance.IsInteractive,
+                        Environment.GetEnvironmentVariable,
+                        GatewayIsolationMode.Enabled),
+                    Session.AgentToolShim.BuildEnvironment(agentNodePath, applicationDirectory))
+            },
+            $"Opening {shell.DisplayName} in the isolated session.",
+            shell.DisplayName,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<int> RunSetupAsync(
