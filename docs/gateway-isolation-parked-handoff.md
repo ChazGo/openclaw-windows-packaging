@@ -53,17 +53,41 @@ Packaged clean-machine E2E is **not complete**.
 The last product blocker was false recovery-task drift after Task Scheduler
 normalized the task principal and logon-trigger SID into an account name.
 Layer 2 now translates those account names back to SIDs before comparison and
-retains drift for unmapped identities. The corrected final stack was not
-repackaged and rerun through the disposable-VM matrix.
+retains drift for unmapped identities. Signed packages containing that fix were
+produced, but they were not installed or rerun through the disposable-VM
+matrix.
+
+An earlier x64 `0.1.2449.30016` package reported signature status
+`UnknownError`. This was traced to the test harness placing trust in
+`CurrentUser` stores. Importing the public certificate into
+`LocalMachine\TrustedPeople` resolved the harness issue. E2E then exposed the
+scheduler account-name/SID drift fixed in Layer 2; corrected `0.1.2449.30017`
+packages were not rerun.
 
 IsolationSession lifecycle testing must run from a true interactive desktop
 logon. SSH, PowerShell remoting, SYSTEM, and Session 0 use tokens that the
 runtime can reject.
 
-## Preserved package evidence
+## Final package evidence
 
-The following local artifacts are preserved, but none contains final Layer 5
-commit `51cb853d6998cc99fa6d26b66065d7734dd46aea`:
+Signed x64 and ARM64 packages were produced from exact final source
+`51cb853d6998cc99fa6d26b66065d7734dd46aea` at
+`artifacts\batch2\51cb853d699\0.1.2449.30017`:
+
+| Architecture | Bytes | SHA-256 |
+|---|---:|---|
+| x64 | 302427292 | `eb545030604a014c752cf0c26dd5d129ef492992e78ce291071b45dcbbcaa8b2` |
+| ARM64 | 295626881 | `b139e72058afe3330abd6aaff4c9530f25cf2a1b29c84e91c182f7679c4de3cf` |
+
+The embedded signer thumbprint is
+`14C6E67556046C81D3ED4F0F42D9558BDFCD29DB`. Hashes, signer status, and package
+containers were independently verified. The output contains no PFX files or
+bundled `node.exe`. These packages were not installed or E2E tested and are not
+release-ready.
+
+## Superseded package evidence
+
+The following older local artifacts remain preserved:
 
 | Artifact | Bytes | SHA-256 | Provenance |
 |---|---:|---|---|
