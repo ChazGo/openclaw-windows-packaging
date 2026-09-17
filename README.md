@@ -223,14 +223,15 @@ not activate it, register its route, or show the **Windows Launcher** tab. When
 explicitly enabled, it adds the read-only tab to the Control group and serves it
 through an authenticated, sandboxed plugin route. It reads only the launch-time
 `CLAWCTL_GATEWAY_ISOLATION` value and registers no mutation RPC or process
-control. The informational page shows **Gateway: Running**, with **Isolation:
-Active** only for the exact `enabled` report (HTTP 200). Missing, malformed,
-or unsupported reports, including `disabled`, show **Isolation: Invalid**
+control. The informational page shows one **Gateway Isolation** row with an
+**Active** badge only for the exact `enabled` report (HTTP 200). Missing, malformed,
+or unsupported reports, including `disabled`, show **Invalid**
 and neutral status-unavailable text (HTTP 503), never a supported off state.
 The live route establishes Gateway availability; disconnected-Gateway messaging
 belongs to the Control UI. There are no isolation controls.
 
-The active page also provides copy-only command references for `openclaw tui`,
+The active page also provides copy-only command references for `clawctl pwsh`,
+`openclaw tui`,
 `clawctl gateway-service status`, a PowerShell 7 restart sequence
 (`clawctl gateway-service stop && clawctl gateway-service start`),
 `openclaw --help`, and `clawctl --help`. The restart sequence manages this
@@ -241,15 +242,18 @@ their own `--help`, not a recursive `--all` option. The page never executes
 commands or sends mutation requests. Copy controls announce success only after
 a clipboard operation succeeds; otherwise they offer manual-copy guidance,
 leaving the command selected when selection is available. Invalid isolation
-reports show no command references.
+reports show no command references. `clawctl pwsh` opens PowerShell inside the
+configured agent session after setup, with `openclaw` and `node` on PATH; exit
+returns to the host. It prefers machine-wide PowerShell 7 and otherwise uses
+Windows PowerShell. Run ClawCtl from the host, not from inside that shell.
+`openclaw tui` is the Gateway chat terminal UI, not an agent shell.
 
 The report is captured once at plugin creation. It is a launcher-provided
-diagnostic, not independent isolation attestation. `OPENCLAW_SESSION` is a
-session-routing preference, not this plugin's runtime-status contract, and is
-not accepted as a substitute. Isolated-session launch paths supply `enabled`;
-direct non-isolated launches supply `disabled` and therefore receive an invalid
-report here. This plugin change does not enable the tab or alter launcher
-routing.
+diagnostic, not independent isolation attestation. The launcher now requires an
+isolated session and supplies `CLAWCTL_GATEWAY_ISOLATION=enabled` to its guest
+processes. It no longer supports host execution or the old `OPENCLAW_SESSION`
+routing preference; that variable is not accepted as a substitute report here.
+This plugin change does not enable the tab or alter launcher execution.
 
 The screenshots attached to the pull request are design and behavior proof
 captured with the plugin explicitly enabled in an isolated validation profile;

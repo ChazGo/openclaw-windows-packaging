@@ -3,9 +3,15 @@ const STATUS_PATH = "/plugins/gateway-isolation/status";
 const THEME_MESSAGE_TYPE = "openclaw:widget-theme";
 const COMMAND_REFERENCES = [
   {
+    id: "agent-shell",
+    title: "Agent session PowerShell",
+    description: "Open PowerShell inside the agent session. Requires setup; exit to return.",
+    command: "clawctl pwsh",
+  },
+  {
     id: "terminal",
-    title: "Terminal UI",
-    description: "Open an interactive terminal UI connected to the Gateway.",
+    title: "Gateway chat TUI",
+    description: "Chat with the Gateway in a terminal. This is not an agent shell.",
     command: "openclaw tui",
   },
   {
@@ -244,7 +250,6 @@ function renderStatusPage(enabled) {
       align-items: center;
       padding: 18px;
     }
-    .status-row + .status-row { border-top: 1px solid var(--border); }
     dt { color: var(--text-strong); font-weight: 600; }
     dd { margin: 0; justify-self: end; min-width: 0; }
     .status {
@@ -314,11 +319,7 @@ function renderStatusPage(enabled) {
     <p class="intro">${description}</p>
     <dl class="status-section" aria-label="Windows Launcher status">
       <div class="status-row">
-        <dt>Gateway</dt>
-        <dd><span class="status status--ok">Running</span></dd>
-      </div>
-      <div class="status-row">
-        <dt>Isolation</dt>
+        <dt>Gateway Isolation</dt>
         <dd><span class="status status--${enabled ? "ok" : "neutral"}">${enabled ? "Active" : "Invalid"}</span></dd>
       </div>
     </dl>

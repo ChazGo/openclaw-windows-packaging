@@ -107,7 +107,9 @@ function assertInformationalPage(html) {
   assert.match(html, /<title>Windows Launcher<\/title>/);
   assert.match(html, /<h1>Windows Launcher<\/h1>/);
   assert.match(html, /<dl[^>]+aria-label="Windows Launcher status"/);
-  assert.match(html, /<dt>Gateway<\/dt>\s*<dd><span class="status status--ok">Running<\/span><\/dd>/);
+  assert.equal([...html.matchAll(/<dt>/g)].length, 1);
+  assert.match(html, /<dt>Gateway Isolation<\/dt>/);
+  assert.doesNotMatch(html, />Running<|<dt>Gateway<\/dt>|<dt>Isolation<\/dt>/);
   assert.doesNotMatch(
     html,
     /<input|<select|<form|Change with CLI|--no-isolation|Disabled|Not running|clawctl gateway isolation|fetch\(|XMLHttpRequest|WebSocket/i,
@@ -147,16 +149,18 @@ test("does not use session-routing preference as isolation evidence", () => {
   }), "enabled");
 });
 
-test("renders only informational running and active status", () => {
+test("renders one informational Gateway Isolation row with a single active badge", () => {
   const html = renderGatewayIsolationPage("enabled");
   assertInformationalPage(html);
-  assert.match(html, /<dt>Isolation<\/dt>\s*<dd><span class="status status--ok">Active<\/span><\/dd>/);
+  assert.match(html, /<dt>Gateway Isolation<\/dt>\s*<dd><span class="status status--ok">Active<\/span><\/dd>/);
+  assert.equal([...html.matchAll(/class="status status--ok"/g)].length, 1);
   assert.match(html, /This Gateway is running in Windows isolation\./);
   assert.doesNotMatch(html, />Invalid<|Isolation status is unavailable/);
 });
 
 const expectedCommands = [
-  ["Terminal UI", "openclaw tui"],
+  ["Agent session PowerShell", "clawctl pwsh"],
+  ["Gateway chat TUI", "openclaw tui"],
   ["Gateway status", "clawctl gateway-service status"],
   ["Restart Gateway", "clawctl gateway-service stop && clawctl gateway-service start"],
   ["OpenClaw help", "openclaw --help"],
@@ -174,6 +178,8 @@ test("offers only supported general commands with individually named copy contro
   assert.match(html, /PowerShell 7 on the Gateway host/);
   assert.match(html, /This page never runs commands/);
   assert.match(html, /only if stopping succeeds/);
+  assert.match(html, /Requires setup; exit to return/);
+  assert.match(html, /This is not an agent shell/);
   assert.match(html, /role="status" aria-live="polite" aria-atomic="true"/);
   assert.match(html, /button:focus-visible/);
   assert.match(html, /@media \(max-width: 620px\)/);
@@ -243,9 +249,9 @@ test("copies every exact command synchronously and announces only successful cop
 for (const legacy of [false, "throw"]) {
   test(`uses Clipboard API when legacy copy returns ${legacy}`, async () => {
     const copy = runCopyScript({ legacy, modern: "success" });
-    await copy.buttons[2].click();
+    await copy.buttons[3].click();
     assert.equal(copy.feedback.textContent, "Copied Restart Gateway command.");
-    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[2][1]]);
+    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[3][1]]);
   });
   for (const modern of ["missing", "reject"]) {
     test(`offers selected manual copy when legacy=${legacy} and modern=${modern}`, async () => {
@@ -263,15 +269,15 @@ for (const legacy of [false, "throw"]) {
 test("reports inability to select or copy without claiming manual selection succeeded", async () => {
   const copy = runCopyScript({ selectionAvailable: false });
   await copy.buttons[0].click();
-  assert.equal(copy.feedback.textContent, "Could not copy Terminal UI command. Select the command and copy it manually.");
+  assert.equal(copy.feedback.textContent, "Could not copy Agent session PowerShell command. Select the command and copy it manually.");
   assert.equal(copy.selected, undefined);
 });
 
 test("can use Clipboard API without DOM selection support", async () => {
   const copy = runCopyScript({ selectionAvailable: false, modern: "success" });
   await copy.buttons[0].click();
-  assert.equal(copy.feedback.textContent, "Copied Terminal UI command.");
-  assert.deepEqual(copy.calls, [["modern", "openclaw tui"]]);
+  assert.equal(copy.feedback.textContent, "Copied Agent session PowerShell command.");
+  assert.deepEqual(copy.calls, [["modern", "clawctl pwsh"]]);
 });
 
 test("applies recognized host theme tokens from the parent frame", () => {
@@ -443,10 +449,10 @@ for (const mode of invalidModes) {
     assertInformationalPage(response.body);
     assert.match(response.body, /Isolation status is unavailable\./);
     assert.match(response.body, /did not provide a valid isolation report/);
-    assert.match(response.body, /<dt>Isolation<\/dt>\s*<dd><span class="status status--neutral">Invalid<\/span><\/dd>/);
+    assert.match(response.body, /<dt>Gateway Isolation<\/dt>\s*<dd><span class="status status--neutral">Invalid<\/span><\/dd>/);
     assert.doesNotMatch(
       response.body,
-      />Active<|status--warn|<script>alert|<button|<code|clipboard|execCommand|getSelection|createRange|aria-live|id="copy-status"|clawctl|Command reference/,
+      />Active<|class="status status--ok"|status--warn|<script>alert|<button|<code|clipboard|execCommand|getSelection|createRange|aria-live|id="copy-status"|clawctl|Command reference/,
     );
     const bridge = runThemeBridge(response.body);
     bridge.listener({
