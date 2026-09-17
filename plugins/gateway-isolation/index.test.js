@@ -64,7 +64,7 @@ function invokeRoute(route) {
 
 function runThemeBridge(html) {
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-  assert.ok(scripts.length >= 1);
+  assert.equal(scripts.length, 1);
   const properties = new Map();
   const root = {
     dataset: {},
@@ -98,55 +98,62 @@ function runThemeBridge(html) {
   return { listener, parent, properties, root };
 }
 
-test("accepts only the exact launcher isolation values", () => {
+const invalidModes = [
+  undefined, null, "", "disabled", "invalid", "ENABLED", " enabled ",
+  "1", true, 1, "<script>alert(1)</script>",
+];
+
+function assertInformationalPage(html) {
+  assert.match(html, /<title>Windows Launcher<\/title>/);
+  assert.match(html, /<h1>Windows Launcher<\/h1>/);
+  assert.match(html, /<dl[^>]+aria-label="Windows Launcher status"/);
+  assert.match(html, /<dt>Gateway<\/dt>\s*<dd><span class="status status--ok">Running<\/span><\/dd>/);
+  assert.doesNotMatch(
+    html,
+    /<button|<input|<select|<form|<code|clipboard|execCommand|getSelection|createRange|aria-live|copy-status|Change with CLI|clawctl|--no-isolation|Disabled|Not running|--button-bg|--font-mono|--focus/i,
+  );
+}
+
+function assertHeaders(response) {
+  assert.deepEqual(response.headers, {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy":
+      "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self'",
+    "Content-Type": "text/html; charset=utf-8",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+  });
+}
+
+test("accepts only the exact enabled launcher report", () => {
   assert.equal(readGatewayIsolationMode({ CLAWCTL_GATEWAY_ISOLATION: "enabled" }), "enabled");
-  assert.equal(readGatewayIsolationMode({ CLAWCTL_GATEWAY_ISOLATION: "disabled" }), "disabled");
-  for (const value of [undefined, "", "ENABLED", "unknown"]) {
+  for (const value of invalidModes) {
     assert.equal(readGatewayIsolationMode({ CLAWCTL_GATEWAY_ISOLATION: value }), null);
   }
 });
 
-for (const expected of [
-  {
-    mode: "enabled",
-    status: "Enabled",
-    tone: "status--ok",
-    command: "clawctl gateway-isolation disable",
-  },
-  {
-    mode: "disabled",
-    status: "Disabled",
-    tone: "status--warn",
-    command: "clawctl gateway-isolation enable",
-  },
-]) {
-  test(`renders the exact ${expected.mode} read-only status`, () => {
-    const html = renderGatewayIsolationPage(expected.mode);
-    assert.match(html, /Windows Launcher/);
-    assert.match(html, /Gateway Isolation/);
-    assert.match(html, new RegExp(`>${expected.status}<`));
-    assert.match(html, new RegExp(expected.tone));
-    assert.match(html, /Change with CLI/);
-    assert.match(
-      html,
-      /Command support is expected in a paired launcher update\./,
-    );
-    assert.match(
-      html,
-      /Run from the signed-in user session on the Gateway host after that support is installed\./,
-    );
-    assert.match(html, new RegExp(expected.command));
-    assert.match(html, /aria-label="Copy command"/);
-    assert.match(html, /Copy the selected command manually\./);
-    assert.match(html, /copied = document\.execCommand\("copy"\)/);
-    assert.match(html, /openclaw:widget-theme/);
-    assert.match(
-      html,
-      /--font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Liberation Mono", monospace;/,
-    );
-    assert.doesNotMatch(html, /next manual Gateway restart/i);
-  });
-}
+test("does not use session-routing preference as isolation evidence", () => {
+  for (const mode of invalidModes) {
+    assert.equal(readGatewayIsolationMode({
+      CLAWCTL_GATEWAY_ISOLATION: mode,
+      OPENCLAW_SESSION: "1",
+    }), null);
+  }
+  assert.equal(readGatewayIsolationMode({
+    CLAWCTL_GATEWAY_ISOLATION: "enabled",
+    get OPENCLAW_SESSION() {
+      throw new Error("Routing preference must not be read.");
+    },
+  }), "enabled");
+});
+
+test("renders only informational running and active status", () => {
+  const html = renderGatewayIsolationPage("enabled");
+  assertInformationalPage(html);
+  assert.match(html, /<dt>Isolation<\/dt>\s*<dd><span class="status status--ok">Active<\/span><\/dd>/);
+  assert.match(html, /This Gateway is running in Windows isolation\./);
+  assert.doesNotMatch(html, /Invalid|unavailable/);
+});
 
 test("applies recognized host theme tokens from the parent frame", () => {
   const bridge = runThemeBridge(renderGatewayIsolationPage("enabled"));
@@ -179,20 +186,32 @@ test("applies recognized host theme tokens from the parent frame", () => {
   assert.equal(bridge.root.style.colorScheme, "dark");
   assert.equal(bridge.properties.get("--bg"), "#101010");
   assert.equal(bridge.properties.get("--card"), "#202020");
-  assert.equal(bridge.properties.get("--button-bg"), "#303030");
   assert.equal(bridge.properties.get("--text"), "#fefefe");
   assert.equal(bridge.properties.get("--text-strong"), "#ffffff");
-  assert.equal(bridge.properties.get("--focus"), "#55aaff");
   assert.equal(bridge.properties.get("--radius"), "14px");
   assert.equal(bridge.properties.get("--radius-full"), "9999px");
   assert.equal(bridge.properties.get("--font-body"), "Georgia, serif");
-  assert.equal(bridge.properties.get("--font-mono"), "Consolas, monospace");
   assert.match(bridge.properties.get("--ok-bg"), /#44cc77 18%, #202020/);
-  assert.match(bridge.properties.get("--warn-bg"), /#e0a020 18%, #202020/);
+  for (const unused of ["--button-bg", "--focus", "--font-mono", "--warn-text", "--warn-bg"]) {
+    assert.equal(bridge.properties.has(unused), false);
+  }
+
+  bridge.listener({
+    source: bridge.parent,
+    data: {
+      type: "openclaw:widget-theme",
+      mode: "light",
+      tokens: { surface: "#fafafa", card: "#ffffff", ok: "#116329" },
+    },
+  });
+  assert.equal(bridge.root.dataset.themeMode, "light");
+  assert.equal(bridge.root.style.colorScheme, "light");
+  assert.equal(bridge.properties.get("--bg"), "#fafafa");
+  assert.match(bridge.properties.get("--ok-bg"), /#116329 18%, #ffffff/);
 });
 
 test("ignores theme messages from other frames and malformed host values", () => {
-  const bridge = runThemeBridge(renderGatewayIsolationPage("disabled"));
+  const bridge = runThemeBridge(renderGatewayIsolationPage("enabled"));
   for (const event of [
     {
       source: {},
@@ -219,6 +238,22 @@ test("ignores theme messages from other frames and malformed host values", () =>
   }
   assert.equal(bridge.root.style.colorScheme, "");
   assert.deepEqual([...bridge.properties], []);
+  bridge.listener({
+    source: bridge.parent,
+    data: {
+      type: "openclaw:widget-theme",
+      mode: "light",
+      tokens: {
+        surface: "",
+        card: " ",
+        text: 123,
+        muted: "x".repeat(257),
+        radius: null,
+        unknown: "red",
+      },
+    },
+  });
+  assert.deepEqual([...bridge.properties], []);
 });
 
 test("registers one read-only Control tab and one authenticated sandbox route", () => {
@@ -240,12 +275,12 @@ test("registers one read-only Control tab and one authenticated sandbox route", 
 
   const response = invokeRoute(routes[0]);
   assert.equal(response.statusCode, 200);
-  assert.equal(response.headers["Cache-Control"], "no-store");
-  assert.match(response.headers["Content-Security-Policy"], /frame-ancestors 'self'/);
-  assert.match(response.body, />Enabled</);
+  assertHeaders(response);
+  assertInformationalPage(response.body);
+  assert.match(response.body, />Active</);
 });
 
-for (const initial of ["enabled", "disabled", undefined, "", "invalid", "ENABLED", " enabled "]) {
+for (const initial of ["enabled", ...invalidModes]) {
   test(`reads ${JSON.stringify(initial) ?? "missing"} exactly once and keeps every response stable`, () => {
     let reads = 0;
     let value = initial;
@@ -266,13 +301,10 @@ for (const initial of ["enabled", "disabled", undefined, "", "invalid", "ENABLED
     });
 
     const first = invokeRoute(routes[0]);
-    assert.equal(first.statusCode, initial === "enabled" || initial === "disabled" ? 200 : 503);
-    if (initial === "enabled") assert.match(first.body, />Enabled</);
-    if (initial === "disabled") assert.match(first.body, />Disabled</);
-    assert.match(
-      first.body,
-      /--font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Liberation Mono", monospace;/,
-    );
+    assert.equal(first.statusCode, initial === "enabled" ? 200 : 503);
+    assert.match(first.body, initial === "enabled" ? />Active</ : />Invalid</);
+    assertInformationalPage(first.body);
+    assertHeaders(first);
     for (value of ["enabled", "disabled", "invalid", undefined]) {
       assert.deepEqual(invokeRoute(routes[0]), first);
     }
@@ -280,16 +312,19 @@ for (const initial of ["enabled", "disabled", undefined, "", "invalid", "ENABLED
   });
 }
 
-for (const mode of [undefined, "", "invalid", "ENABLED", " enabled "]) {
+for (const mode of invalidModes) {
   const label = JSON.stringify(mode) ?? "missing";
-    test(`fails closed for ${label} with no status or mutation guidance`, () => {
+  test(`fails closed for ${label} with neutral invalid status and no mutation guidance`, () => {
     const { routes } = registerPlugin(mode);
     const response = invokeRoute(routes[0]);
     assert.equal(response.statusCode, 503);
-    assert.match(response.body, /did not provide a valid Gateway isolation mode/);
+    assertInformationalPage(response.body);
+    assert.match(response.body, /Isolation status is unavailable\./);
+    assert.match(response.body, /did not provide a valid isolation report/);
+    assert.match(response.body, /<dt>Isolation<\/dt>\s*<dd><span class="status status--neutral">Invalid<\/span><\/dd>/);
     assert.doesNotMatch(
       response.body,
-      /status--(?:ok|warn)|<button|Change with CLI|clawctl gateway-isolation/,
+      />Active<|status--warn|<script>alert/,
     );
     const bridge = runThemeBridge(response.body);
     bridge.listener({
@@ -304,9 +339,7 @@ for (const mode of [undefined, "", "invalid", "ENABLED", " enabled "]) {
     assert.equal(bridge.properties.get("--bg"), "#101010");
     assert.equal(bridge.properties.get("--text"), "#fefefe");
     assert.equal(bridge.properties.get("--muted"), "#aaaaaa");
-    assert.equal(response.headers["Cache-Control"], "no-store");
-    assert.equal(response.headers["X-Content-Type-Options"], "nosniff");
-    assert.equal(response.headers["Referrer-Policy"], "no-referrer");
+    assertHeaders(response);
   });
   test(`renderer rejects ${label}`, () => {
     assert.throws(() => renderGatewayIsolationPage(mode), TypeError);

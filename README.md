@@ -220,16 +220,21 @@ provisions the packaging-owned Windows Launcher plugin into the payload copy's
 bundled plugin directory. Its internal package, path, and plugin ID remain
 `gateway-isolation`. The plugin is disabled by default, so normal installs do
 not activate it, register its route, or show the **Windows Launcher** tab. When
-explicitly enabled for validation or by the future launcher command
-implementation, it adds the read-only tab to the Control group and serves it
+explicitly enabled, it adds the read-only tab to the Control group and serves it
 through an authenticated, sandboxed plugin route. It reads only the launch-time
 `CLAWCTL_GATEWAY_ISOLATION` value and registers no mutation RPC or process
-control.
+control. The informational page shows **Gateway: Running**, with **Isolation:
+Active** only for the exact `enabled` report (HTTP 200). Missing, malformed,
+or unsupported reports, including `disabled`, show **Isolation: Invalid**
+and neutral status-unavailable text (HTTP 503), never a supported off state.
+The live route establishes Gateway availability; disconnected-Gateway messaging
+belongs to the Control UI. There are no isolation controls or CLI instructions.
 
-The page preserves the planned `clawctl gateway-isolation enable|disable`
-command and Copy control for the paired launcher command update. This package
-does not register those `clawctl` commands yet, so the page explicitly tells
-users to run the command only after that support is installed.
+The report is captured once at plugin creation. It is a launcher-provided
+diagnostic, not independent isolation attestation. `OPENCLAW_SESSION` is a
+session-routing preference, not this plugin's runtime-status contract, and is
+not accepted as a substitute. Launcher activation and a reliable isolated-launch
+report remain separate integration dependencies; this change enables neither.
 
 The screenshots attached to the pull request are design and behavior proof
 captured with the plugin explicitly enabled in an isolated validation profile;
