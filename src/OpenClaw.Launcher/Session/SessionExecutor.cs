@@ -34,6 +34,9 @@ internal sealed record SessionCommandRequest(
     IReadOnlyList<string> Arguments,
     string WorkingDirectory)
 {
+    /// <summary>Guest directory that must lead the child process PATH.</summary>
+    public string? PathPrefix { get; init; }
+
     /// <summary>
     /// Values merged over the shared runtime environment for this command only.
     /// </summary>
@@ -77,6 +80,9 @@ internal sealed class SessionExecutor
         _isCurrentRecord = isCurrentRecord ?? (_ => true);
     }
 
+    internal SessionWorkspaceOperation CreateWorkspaceOperation(SessionRecord record) =>
+        new(record, _isCurrentRecord);
+
     public async Task<int> ExecuteAsync(
         SessionRecord record,
         SessionExecutionRequest request,
@@ -84,6 +90,11 @@ internal sealed class SessionExecutor
     {
         ArgumentNullException.ThrowIfNull(record);
         ArgumentNullException.ThrowIfNull(request);
+
+        string nodeDirectory = Path.GetDirectoryName(request.NodePath)
+            ?? throw new SessionException(
+                "The agent Node.js executable has no parent directory.");
+        IReadOnlyDictionary<string, string> environment = _buildEnvironment();
 
         return await ExecuteCommandAsync(
             record,
@@ -93,7 +104,10 @@ internal sealed class SessionExecutor
                 BuildNodeArguments(request),
                 request.WorkingDirectory)
             {
-                AdditionalEnvironment = request.AdditionalEnvironment
+                PathPrefix = nodeDirectory,
+                AdditionalEnvironment = MergeEnvironment(
+                    environment,
+                    request.AdditionalEnvironment)
             },
             "Running OpenClaw in the isolated session.",
             "OpenClaw",
@@ -132,6 +146,7 @@ internal sealed class SessionExecutor
             WorkingDirectory = request.WorkingDirectory,
             Environment = MergeEnvironment(
                 _buildEnvironment(), request.AdditionalEnvironment),
+            PathPrefix = request.PathPrefix,
         };
 
         try
@@ -162,7 +177,14 @@ internal sealed class SessionExecutor
         }
     }
 
-    /// <summary>Asks the guest to stage diagnostics into the shared workspace.</summary>
+    /// <summary>
+    /// Asks the guest to stage diagnostic files into the shared workspace.
+    /// </summary>
+    /// <remarks>
+    /// Uses the helper's collect mode rather than the launch mode, because
+    /// nothing is being run inside the session: the guest only copies files the
+    /// host's own account cannot open.
+    /// </remarks>
     public async Task<SessionCollectResult> CollectAsync(
         SessionRecord record,
         string helperPath,
@@ -193,7 +215,7 @@ internal sealed class SessionExecutor
 
             _log("Collecting agent-side diagnostics from the isolated session.");
 
-            int executorExitCode = await _backend.ExecuteAttachedAsync(
+            MxcExecutionResult execution = await _backend.ExecuteAsync(
                 record.ToSandboxIdOrThrow(),
                 new MxcExecutionRequest(
                     BuildGuestCommandLine(helperPath, requestPath, "--collect")),
@@ -211,7 +233,7 @@ internal sealed class SessionExecutor
             {
                 throw new SessionException(
                     "The isolated session did not report a collection result " +
-                    $"(executor exit code {executorExitCode}).");
+                    DescribeMissingResult(execution));
             }
 
             SessionCollectResult result = SessionCollectProtocol.ReadResult(resultText);
@@ -237,7 +259,13 @@ internal sealed class SessionExecutor
         }
     }
 
-    /// <summary>Installs the package's Node.js runtime in the agent profile.</summary>
+    /// <summary>
+    /// Installs the packaged Node.js runtime into the agent's profile.
+    /// </summary>
+    /// <remarks>
+    /// Setup invokes this explicitly rather than leaving the first gateway
+    /// launch to discover a missing agent runtime.
+    /// </remarks>
     public async Task<SessionRuntimeInstallResult> InstallRuntimeAsync(
         SessionRecord record,
         string helperPath,

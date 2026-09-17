@@ -37,7 +37,8 @@ public sealed class SessionExecutorTests : IDisposable
             arguments,
             @"C:\work");
 
-    private SessionExecutor Create() => new(_backend, _log.Add);
+    private SessionExecutor Create(Func<string>? createRequestId = null) =>
+        new(_backend, _log.Add, createRequestId: createRequestId);
 
     [Fact]
     public async Task IsolatedLaunchRetainsTheHostInteractiveEnvironment()
@@ -58,7 +59,7 @@ public sealed class SessionExecutorTests : IDisposable
             Record(),
             new SessionExecutionRequest(
                 @"C:\Package\session-host\x64\openclaw-session-host.exe",
-                @"C:\Program Files\nodejs\node.exe",
+                @"C:\Users\agent\AppData\Local\OpenClawGatewayMSIX\agent-node\node-v24.20.0-win-x64\node.exe",
                 @"C:\Package\app",
                 [],
                 Workspace)
@@ -105,7 +106,7 @@ public sealed class SessionExecutorTests : IDisposable
     private void RespondAsCollector(
         Func<SessionCollectRequest, SessionCollectResult> respond)
     {
-        _backend.AttachedBehavior = _ =>
+        _backend.ExecuteBehavior = _ =>
         {
             string requestPath = Directory.GetFiles(Workspace, "collect-*.json")
                 .Single(path => !path.EndsWith(".result.json", StringComparison.Ordinal));
@@ -114,7 +115,23 @@ public sealed class SessionExecutorTests : IDisposable
             File.WriteAllText(
                 SessionLaunchProtocol.ResultPathFor(requestPath),
                 SessionCollectProtocol.SerializeResult(respond(request)));
-            return Task.FromResult(0);
+            return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
+        };
+    }
+
+    private void RespondAsRuntimeInstaller(
+        Func<SessionRuntimeInstallRequest, SessionRuntimeInstallResult> respond)
+    {
+        _backend.ExecuteBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(Workspace, "runtime-*.json")
+                .Single(path => !path.EndsWith(".result.json", StringComparison.Ordinal));
+            SessionRuntimeInstallRequest request = SessionRuntimeProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionRuntimeProtocol.SerializeResult(respond(request)));
+            return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
         };
     }
 
@@ -140,11 +157,77 @@ public sealed class SessionExecutorTests : IDisposable
             ["openclaw-agent.sqlite*"],
             CancellationToken.None);
 
-        Assert.Equal(["execute-attached:iso:sandbox1"], _backend.Calls);
+        Assert.Equal(["execute:iso:sandbox1"], _backend.Calls);
         Assert.Equal(
             @"AppData\Roaming\openclaw\logs",
             Assert.Single(delivered!.Sources!).RelativePath);
         Assert.True(Assert.Single(result.Entries!).Copied);
+    }
+
+    // This catches collection following a guest-writable result link to a
+    // host-readable file before checking the response's request identity.
+    [Fact]
+    public async Task CollectionRefusesAReparsePointResultOutsideTheWorkspace()
+    {
+        string collectionRoot = Path.Combine(Workspace, "collection");
+        string nestedWorkspace = Path.Combine(collectionRoot, "workspace");
+        string outsideTarget = Path.Combine(collectionRoot, "outside", "result.json");
+        Directory.CreateDirectory(nestedWorkspace);
+        Directory.CreateDirectory(Path.GetDirectoryName(outsideTarget)!);
+        await File.WriteAllTextAsync(outsideTarget, """{"requestId":"other"}""");
+        _backend.ExecuteBehavior = _ =>
+        {
+            string requestPath = Path.Combine(
+                nestedWorkspace,
+                "collect-test-generation-reparse-test.json");
+            File.CreateSymbolicLink(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                outsideTarget);
+            return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
+        };
+
+        SessionException exception = await Assert.ThrowsAsync<SessionException>(
+            () => Create(() => "reparse-test").CollectAsync(
+                Record(nestedWorkspace),
+                @"C:\Package\session-host\x64\openclaw-session-host.exe",
+                Path.Combine(nestedWorkspace, "staged"),
+                [],
+                [],
+                CancellationToken.None));
+
+        Assert.Contains("reparse", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.GetFiles(nestedWorkspace));
+        Assert.Empty(Directory.GetFiles(nestedWorkspace, "*.result.json"));
+        Assert.True(File.Exists(outsideTarget));
+    }
+
+    [Fact]
+    public async Task RuntimeInstallUsesTheGuestHelperAndReturnsItsResult()
+    {
+        SessionRuntimeInstallRequest? delivered = null;
+        RespondAsRuntimeInstaller(request =>
+        {
+            delivered = request;
+            return new SessionRuntimeInstallResult
+            {
+                RequestId = request.RequestId,
+                ExecutablePath = @"C:\Users\agent_1\AppData\Local\OpenClawGatewayMSIX\agent-node\node.exe",
+                Version = "24.20.0",
+                ArchiveName = "node-v24.20.0-win-x64.zip"
+            };
+        });
+
+        SessionRuntimeInstallResult result = await Create().InstallRuntimeAsync(
+            Record(),
+            @"C:\Package\session-host\x64\openclaw-session-host.exe",
+            @"C:\Package\runtime\node-v24.20.0-win-x64.zip",
+            CancellationToken.None);
+
+        Assert.Equal(
+            @"C:\Package\runtime\node-v24.20.0-win-x64.zip",
+            delivered!.ArchivePath);
+        Assert.Equal("24.20.0", result.Version);
+        Assert.Equal(["execute:iso:sandbox1"], _backend.Calls);
         Assert.Empty(Directory.GetFiles(Workspace));
     }
 
@@ -181,6 +264,38 @@ public sealed class SessionExecutorTests : IDisposable
             CancellationToken.None);
 
         Assert.Equal(42, exitCode);
+    }
+
+    [Fact]
+    public async Task IsolatedLaunchPrependsTheSelectedAgentNodeDirectory()
+    {
+        SessionLaunchRequest? delivered = null;
+        RespondAsHelper(request =>
+        {
+            delivered = request;
+            return new SessionLaunchResult
+            {
+                RequestId = request.RequestId,
+                Launched = true,
+                ExitCode = 0,
+            };
+        });
+        string node = @"C:\Users\agent\AppData\Local\OpenClawGatewayMSIX\agent-node\node-v24.20.0-win-x64\node.exe";
+
+        await Create().ExecuteAsync(
+            Record(),
+            new SessionExecutionRequest(
+                @"C:\Package\session-host\x64\openclaw-session-host.exe",
+                node,
+                @"C:\Package\app",
+                [],
+                Workspace),
+            CancellationToken.None);
+
+        Assert.Equal(Path.GetDirectoryName(node), delivered!.PathPrefix);
+        Assert.False(
+            delivered.Environment!.ContainsKey("PATH"),
+            "The host must not send a PATH that would replace the agent's own.");
     }
 
     [Fact]

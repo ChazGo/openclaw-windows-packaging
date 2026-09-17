@@ -84,18 +84,30 @@ internal sealed class SessionBusyException : SessionException
 }
 
 /// <summary>
-/// Whether a usable session is recorded, without consulting the backend.
+/// What status established about the owned session.
 /// </summary>
 internal enum SessionAvailability
 {
     /// <summary>No session has been recorded; a first one may be created.</summary>
     None,
 
-    /// <summary>A usable record exists. It says nothing about liveness.</summary>
+    /// <summary>A usable record exists but its backend state is not known.</summary>
     Recorded,
 
     /// <summary>A record exists but cannot be used. Recovery is required.</summary>
     Unusable,
+
+    /// <summary>The backend accepted the recorded provision and started it.</summary>
+    Running,
+
+    /// <summary>The backend explicitly reported that the recorded provision is missing.</summary>
+    Stale,
+
+    /// <summary>The MXC runtime or backend could not be reached.</summary>
+    BackendUnavailable,
+
+    /// <summary>The MXC backend returned an error other than a missing provision.</summary>
+    BackendError,
 }
 
 /// <summary>
@@ -118,6 +130,18 @@ internal sealed record SessionStatus(
 /// report the degraded path instead of claiming a clean teardown.
 /// </param>
 internal sealed record SessionRemovalResult(bool Removed, string? StopFailure);
+
+/// <summary>
+/// The result of ensuring that an owned session is started.
+/// </summary>
+/// <param name="Record">The started session record.</param>
+/// <param name="SupersededRecord">
+/// The previously owned record MXC explicitly reported as stale, when setup
+/// had to replace it.
+/// </param>
+internal sealed record SessionStartResult(
+    SessionRecord Record,
+    SessionRecord? SupersededRecord);
 
 /// <summary>
 /// Owns this installation's isolated session across processes.
@@ -181,9 +205,72 @@ internal sealed class SessionCoordinator
     }
 
     /// <summary>
+    /// Establishes whether the recorded provision can be started by MXC without
+    /// creating or replacing a session.
+    /// </summary>
+    /// <remarks>
+    /// IsolationSession has no separate per-provision read API. Starting a
+    /// recorded provision is its state-aware probe: it succeeds only when that
+    /// exact backend provision exists and leaves no host record changes.
+    /// </remarks>
+    public async Task<SessionStatus> ProbeRecordedStatusAsync(
+        CancellationToken cancellationToken)
+    {
+        using ISessionLockHandle handle = AcquireLock();
+
+        SessionStatus status = GetRecordedStatus();
+        if (status.Record is null)
+        {
+            return status;
+        }
+
+        try
+        {
+            await StartAsync(status.Record, cancellationToken).ConfigureAwait(false);
+            return new SessionStatus(
+                SessionAvailability.Running,
+                status.Record,
+                null,
+                "MXC started the recorded provision.");
+        }
+        catch (MxcException exception) when (exception.Code == MxcErrorCode.StaleId)
+        {
+            return new SessionStatus(
+                SessionAvailability.Stale,
+                status.Record,
+                null,
+                "MXC reported that the recorded provision is missing. Run `clawctl setup` to replace it.");
+        }
+        catch (MxcException exception) when (exception.Code == MxcErrorCode.RuntimeUnavailable)
+        {
+            return new SessionStatus(
+                SessionAvailability.BackendUnavailable,
+                status.Record,
+                null,
+                exception.Message);
+        }
+        catch (MxcException exception)
+        {
+            return new SessionStatus(
+                SessionAvailability.BackendError,
+                status.Record,
+                null,
+                exception.Message);
+        }
+    }
+
+    /// <summary>
     /// Returns the owned, started session, creating it only on first use.
     /// </summary>
     public async Task<SessionRecord> EnsureStartedAsync(
+        CancellationToken cancellationToken) =>
+        (await EnsureStartedWithResultAsync(cancellationToken).ConfigureAwait(false)).Record;
+
+    /// <summary>
+    /// Returns the owned, started session and identifies an explicitly stale
+    /// record when setup replaced it.
+    /// </summary>
+    internal async Task<SessionStartResult> EnsureStartedWithResultAsync(
         CancellationToken cancellationToken)
     {
         using ISessionLockHandle handle = AcquireLock();
@@ -192,9 +279,23 @@ internal sealed class SessionCoordinator
         if (state.Record is not null)
         {
             _log("Reusing the recorded OpenClaw session.");
-            await StartAsync(state.Record, cancellationToken)
-                .ConfigureAwait(false);
-            return state.Record;
+            try
+            {
+                await StartAsync(state.Record, cancellationToken)
+                    .ConfigureAwait(false);
+                return new SessionStartResult(state.Record, null);
+            }
+            catch (MxcException exception) when (exception.Code == MxcErrorCode.StaleId)
+            {
+                _log(
+                    "The recorded OpenClaw provision no longer exists. " +
+                    "Provisioning a replacement for this installation.");
+                SessionRecord replacement = await ProvisionAndStartAsync(
+                    GetSupersededSandboxIds(state.Record),
+                    cancellationToken)
+                    .ConfigureAwait(false);
+                return new SessionStartResult(replacement, state.Record);
+            }
         }
 
         if (state.Fault != SessionStateFault.Missing)
@@ -205,6 +306,15 @@ internal sealed class SessionCoordinator
         }
 
         _log("Creating the first OpenClaw session for this installation.");
+        SessionRecord provisioned = await ProvisionAndStartAsync([], cancellationToken)
+            .ConfigureAwait(false);
+        return new SessionStartResult(provisioned, null);
+    }
+
+    private async Task<SessionRecord> ProvisionAndStartAsync(
+        IReadOnlyList<string> supersededSandboxIds,
+        CancellationToken cancellationToken)
+    {
         MxcProvisionResult provisioned = await _backend
             .ProvisionAsync(new MxcProvisionRequest(_applicationId), cancellationToken)
             .ConfigureAwait(false);
@@ -221,6 +331,7 @@ internal sealed class SessionCoordinator
             WorkspacePath = provisioned.Metadata?.EphemeralWorkspacePath,
             Generation = Guid.NewGuid().ToString("N"),
             CreatedUtc = _clock.GetUtcNow(),
+            SupersededSandboxIds = [.. supersededSandboxIds],
         };
         try
         {
@@ -247,6 +358,14 @@ internal sealed class SessionCoordinator
         await StartAsync(record, cancellationToken).ConfigureAwait(false);
         return record;
     }
+
+    private static IReadOnlyList<string> GetSupersededSandboxIds(SessionRecord record) =>
+        [.. (record.SupersededSandboxIds ?? [])
+            .Append(record.SupersededSandboxId)
+            .Append(record.SandboxId)
+            .Where(static id => !string.IsNullOrWhiteSpace(id))
+            .Select(static id => id!)
+            .Distinct(StringComparer.Ordinal)];
 
     /// <summary>
     /// Starts the recorded session without provisioning a replacement.
@@ -302,7 +421,12 @@ internal sealed class SessionCoordinator
         CancellationToken cancellationToken)
     {
         using ISessionLockHandle handle = AcquireLock();
+        return await RemoveUnderLockAsync(cancellationToken).ConfigureAwait(false);
+    }
 
+    internal async Task<SessionRemovalResult> RemoveUnderLockAsync(
+        CancellationToken cancellationToken)
+    {
         SessionRecord? record = RequireUsableRecordOrNull();
         if (record is null)
         {

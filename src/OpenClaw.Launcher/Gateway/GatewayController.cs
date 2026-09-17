@@ -158,11 +158,6 @@ internal sealed class GatewayController
         using ISessionLockHandle handle = AcquireLock();
         SessionRecord configured = _requireSetup();
         GatewayStateResult existing = _store.Read();
-        if (existing.Record?.LaunchPending == true)
-        {
-            throw new SessionException(
-                "A previous gateway launch was not confirmed. Inspect diagnostics before using `clawctl teardown` to remove the owned session.");
-        }
         if (existing.Record is null && existing.Fault != GatewayStateFault.Missing)
         {
             throw new SessionException($"The gateway record could not be used: {existing.Detail}");
@@ -171,6 +166,13 @@ internal sealed class GatewayController
             !string.Equals(existing.Record.SandboxId, configured.SandboxId, StringComparison.Ordinal))
         {
             throw new SessionException("The gateway record belongs to a different session.");
+        }
+        if (existing.Record?.LaunchPending == true)
+        {
+            throw new SessionException(
+                "A previous gateway launch was not confirmed. The launch intent was retained; " +
+                "do not start a replacement. Inspect diagnostics or run `clawctl teardown --force` " +
+                "to recover the owned session.");
         }
 
         SessionRecord session = await _sessions
@@ -187,10 +189,11 @@ internal sealed class GatewayController
 
             if (inspection.IsOwnedAndHealthy)
             {
+                GatewayRecord confirmedRecord = existing.Record;
                 _log("The gateway is already running.");
                 return new GatewayStartResult(
                     GatewayState.Running,
-                    existing.Record,
+                    confirmedRecord,
                     AlreadyRunning: true,
                     "The gateway is already running.");
             }
@@ -211,6 +214,13 @@ internal sealed class GatewayController
                     "`clawctl gateway-service stop` before starting another.");
             }
 
+            if (existing.Record.LaunchPending)
+            {
+                // The guest established that the pending process either exited
+                // or its identifier was reused, so removing this intent cannot
+                // affect an unrelated process.
+                _store.Clear();
+            }
             _log("The recorded gateway is no longer running; starting a new one.");
         }
         else if (existing.Fault != GatewayStateFault.Missing)
@@ -311,11 +321,26 @@ internal sealed class GatewayController
 
     internal async Task<GatewayStopResult> StopUnderLockAsync(
         string helperPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool clearRecord = true,
+        bool allowUnconfirmedLaunch = false,
+        bool allowUnavailableInspection = false)
     {
         GatewayStateResult state = _store.Read();
         if (state.Record?.LaunchPending == true)
         {
+            if (allowUnconfirmedLaunch)
+            {
+                if (clearRecord)
+                {
+                    _store.Clear();
+                }
+
+                return new GatewayStopResult(
+                    Stopped: false,
+                    "The unconfirmed gateway launch record was removed before session teardown.");
+            }
+
             return new GatewayStopResult(false,
                 "The previous launch was not confirmed; its ownership intent was retained.",
                 "Use `clawctl teardown` to stop/deprovision the owned session through MXC.", false);
@@ -354,16 +379,24 @@ internal sealed class GatewayController
         {
             // Nothing is killed on a guess. Acting on an unverified identifier
             // could stop an unrelated process that inherited it.
-            return new GatewayStopResult(
-                Stopped: false,
-                "The gateway could not be stopped because its state could not " +
-                "be established.",
-                inspection.Error, Succeeded: false);
+            return allowUnavailableInspection
+                ? new GatewayStopResult(
+                    Stopped: false,
+                    "Guest gateway inspection was unavailable; session removal will proceed without guest confirmation.",
+                    inspection.Error)
+                : new GatewayStopResult(
+                    Stopped: false,
+                    "The gateway could not be stopped because its state could not " +
+                    "be established. Re-run `clawctl teardown --force` to remove the owned session without guest confirmation.",
+                    inspection.Error, Succeeded: false);
         }
 
         if (!inspection.ProcessFound || !inspection.StartTimeMatches)
         {
-            _store.Clear();
+            if (clearRecord)
+            {
+                _store.Clear();
+            }
             return new GatewayStopResult(
                 Stopped: false,
                 "The recorded gateway was no longer running, so its record was " +
@@ -380,7 +413,10 @@ internal sealed class GatewayController
                 "The gateway stop could not be verified; its record was retained.",
                 stopped.Error, Succeeded: false);
         }
-        _store.Clear();
+        if (clearRecord)
+        {
+            _store.Clear();
+        }
         return new GatewayStopResult(Stopped: true, "The gateway is stopped.");
     }
 
@@ -396,6 +432,7 @@ internal sealed class GatewayController
                 .InspectAsync(session, gateway, helperPath, cancellationToken)
                 .ConfigureAwait(false);
         }
+
         catch (Exception exception) when (
             exception is SessionException or Mxc.MxcException or IOException or UnauthorizedAccessException)
         {

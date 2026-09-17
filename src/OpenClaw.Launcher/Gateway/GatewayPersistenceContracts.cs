@@ -81,10 +81,18 @@ internal sealed record GatewayPersistenceRemovalResult(
 /// <param name="CommandProcessorPath">
 /// The absolute path to the inbox command processor the task runs.
 /// </param>
+/// <param name="DeleteFile">
+/// Optional file-delete seam used to make persistence failures observable in tests.
+/// </param>
+/// <param name="LogonTriggerUserSid">
+/// The interactive user whose logon starts recovery. Defaults to <paramref name="UserSid"/>.
+/// </param>
 internal sealed record GatewayPersistenceOptions(
     string UserSid,
     string PackageFamilyName,
     string LauncherPath,
     string StartupFolderPath,
     string WorkingDirectory,
-    string CommandProcessorPath);
+    string CommandProcessorPath,
+    Action<string>? DeleteFile = null,
+    string? LogonTriggerUserSid = null);

@@ -47,18 +47,6 @@ public sealed class GatewayConfigurationStoreTests : IDisposable
     }
 
     [Fact]
-    public void AConfiguredWorkingDirectoryWinsOverTheDefault()
-    {
-        Store.Write(new GatewayLaunchConfiguration
-        {
-            Port = 9100,
-            WorkingDirectory = @"C:\chosen"
-        });
-
-        Assert.Equal(@"C:\chosen", Store.Resolve(_root, NoEnvironment).WorkingDirectory);
-    }
-
-    [Fact]
     public void TheEnvironmentOverridesThePortForOneInvocationOnly()
     {
         Store.Write(new GatewayLaunchConfiguration { Port = 9100 });
@@ -138,15 +126,13 @@ public sealed class GatewayConfigurationStoreTests : IDisposable
     {
         Store.Write(new GatewayLaunchConfiguration
         {
-            Port = 9100,
-            WorkingDirectory = @"C:\chosen"
+            Port = 9100
         });
 
         GatewayLaunchConfiguration? read = Store.Read().Configuration;
 
         Assert.NotNull(read);
         Assert.Equal(9100, read.Port);
-        Assert.Equal(@"C:\chosen", read.WorkingDirectory);
         Assert.Equal(GatewayConfigurationStore.CurrentSchemaVersion, read.SchemaVersion);
     }
 }

@@ -43,13 +43,14 @@ internal sealed record GatewayLaunchConfiguration
     public int? Port { get; init; }
 
     /// <summary>
-    /// The directory the gateway runs in. Stated rather than inherited: at
-    /// logon a task's directory is the system directory, and an interactive
-    /// caller's directory would make the gateway's behavior depend on where it
-    /// happened to be started from.
+    /// The guest-visible directory the gateway runs in. Stated rather than
+    /// inherited: at logon a task's directory is the system directory, and an
+    /// interactive caller's directory would make the gateway's behavior depend
+    /// on where it happened to be started from.
     /// </summary>
     [JsonPropertyName("workingDirectory")]
     public string? WorkingDirectory { get; init; }
+
 }
 
 /// <summary>Why a stored launch configuration could not be used.</summary>
@@ -205,25 +206,12 @@ internal sealed class GatewayConfigurationStore
                 "TCP port (1-65535).");
         }
 
-        if (configuration.WorkingDirectory is { Length: > 0 } workingDirectory &&
-            !Path.IsPathFullyQualified(workingDirectory))
-        {
-            return new GatewayConfigurationResult(null, GatewayConfigurationFault.Invalid,
-                "The configured working directory must be an absolute guest-visible path.");
-        }
-
         return new GatewayConfigurationResult(configuration, null, null);
     }
 
     public void Write(GatewayLaunchConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        if (configuration.WorkingDirectory is { Length: > 0 } workingDirectory &&
-            !Path.IsPathFullyQualified(workingDirectory))
-        {
-            throw new GatewayConfigurationException("The working directory must be an absolute guest-visible path.");
-        }
-
         if (configuration.Port is int port && !IsUsablePort(port))
         {
             throw new GatewayConfigurationException(

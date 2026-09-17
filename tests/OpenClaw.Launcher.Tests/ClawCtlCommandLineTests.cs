@@ -70,8 +70,9 @@ public sealed class ClawCtlCommandLineTests
     {
         RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
         {
-            Setup = _ => Task.FromResult(0),
+            Setup = (_, _) => Task.FromResult(0),
             Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
             Teardown = (_, _) => Task.FromResult(0),
             PowerShell = _ => Task.FromResult(0),
             GatewayStart = _ => Task.FromResult(0),
@@ -80,7 +81,14 @@ public sealed class ClawCtlCommandLineTests
         });
 
         Assert.Equal(
-            [ClawCtlCommandLine.SetupCommandName, ClawCtlCommandLine.StatusCommandName, "teardown", "pwsh", "gateway-service"],
+            [
+                ClawCtlCommandLine.SetupCommandName,
+                ClawCtlCommandLine.StatusCommandName,
+                ClawCtlCommandLine.CollectLogsCommandName,
+                "teardown",
+                "pwsh",
+                "gateway-service"
+            ],
             root.Subcommands.Select(command => command.Name));
     }
 
@@ -90,8 +98,9 @@ public sealed class ClawCtlCommandLineTests
         int starts = 0;
         RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
         {
-            Setup = _ => Task.FromResult(0),
+            Setup = (_, _) => Task.FromResult(0),
             Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
             Teardown = (_, _) => Task.FromResult(0),
             PowerShell = _ => Task.FromResult(0),
             GatewayStart = _ =>

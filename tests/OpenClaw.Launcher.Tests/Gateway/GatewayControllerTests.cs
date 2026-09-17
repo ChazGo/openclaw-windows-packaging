@@ -110,7 +110,6 @@ public sealed class GatewayControllerTests : IDisposable
                 stagedHelper,
                 nodePath,
                 Path.Combine(_root, "app"),
-                workspace,
                 null),
             CancellationToken.None);
 
@@ -166,7 +165,6 @@ public sealed class GatewayControllerTests : IDisposable
                 HelperPath: Path.Combine(_root, "openclaw-session-host.exe"),
                 NodePath: @"C:\Program Files\nodejs\node.exe",
                 ApplicationDirectory: Path.Combine(_root, "app"),
-                WorkingDirectory: _root,
                 Port: null)),
             _ => { },
             () => sessions.GetRecordedStatus().Record ?? throw new SessionException("Run setup."),
@@ -238,6 +236,39 @@ public sealed class GatewayControllerTests : IDisposable
             StatusPath = "status.json",
             AutostartDisabled = autostartDisabled
         });
+
+    private void RecordPendingGateway(int processId = 0) =>
+        Store.Write(new GatewayRecord
+        {
+            SandboxId = "iso:sandbox1",
+            ProcessId = processId,
+            LaunchPending = true,
+            ProcessStartTimeUtc = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero),
+            Port = null,
+            StatusPath = "status.json"
+        });
+
+    [Fact]
+    public void SupersededSessionReconciliationRemovesOnlyTheMatchingGatewayRecord()
+    {
+        RecordGateway();
+
+        bool removed = Store.ClearForSupersededSession("iso:sandbox1");
+
+        Assert.True(removed);
+        Assert.Equal(GatewayStateFault.Missing, Store.Read().Fault);
+    }
+
+    [Fact]
+    public void SupersededSessionReconciliationPreservesAnUnknownGatewayRecord()
+    {
+        RecordGateway();
+
+        bool removed = Store.ClearForSupersededSession("iso:stale-sandbox");
+
+        Assert.False(removed);
+        Assert.Equal("iso:sandbox1", Store.Read().Record!.SandboxId);
+    }
 
     [Fact]
     public async Task StatusReportsNotStartedWithoutProvisioningASession()
@@ -394,6 +425,21 @@ public sealed class GatewayControllerTests : IDisposable
 
         Assert.True(result.AlreadyRunning);
         Assert.Single(_client.Calls, call => call == "start");
+    }
+
+    [Fact]
+    public async Task AnAmbiguousPendingGatewayIsNotReplacedOrStopped()
+    {
+        RecordPendingGateway(processId: 1234);
+
+        SessionException exception = await Assert.ThrowsAsync<SessionException>(
+            () => CreateController().StartAsync("helper.exe", CancellationToken.None));
+
+        Assert.Contains("teardown --force", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            _client.Calls,
+            call => call == "start" || call.StartsWith("stop:", StringComparison.Ordinal));
+        Assert.True(Store.Read().Record!.LaunchPending);
     }
 
     [Fact]
