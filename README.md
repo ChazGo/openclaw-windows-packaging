@@ -156,9 +156,9 @@ The payload artifact records the requested ref and resolved upstream commit in
 OpenClaw commit, while embedded `payload-files.json` records every packaged
 application file's path, length, and SHA-256.
 
-`release-policy.json` records the immutable OpenClaw commit and payload version
-approved for official signing, plus the independent MSIX package version and
-release tag. Updating that
+`release-policy.json` records the immutable OpenClaw commit and Gateway tag
+approved for official signing, plus an independent MSIX packaging revision.
+Updating that
 policy requires a reviewed repository change. Official signing runs only from
 `main` and verifies the workflow input, policy-approved package version, both
 architecture metadata files, both MSIX hashes, the embedded manifests, and
@@ -200,8 +200,8 @@ they do not represent the default-disabled state of a normal install.
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by
 [`openclaw/openclaw#145409`](https://github.com/openclaw/openclaw/pull/145409).
-The current workflow remains on the release-approved OpenClaw baseline
-`0965053fe6b9341776df147a6934b7485c60b5ca` while this plugin is disabled by
+The current workflow remains on the release-approved OpenClaw `v2026.9.4`
+baseline (`3a9d69db306cd7f081e06254cb89c4bcc14a7107`) while this plugin is disabled by
 default. That baseline packages and inspects the plugin safely but does not
 forward selected Control UI themes into plugin frames. The future launcher
 enablement change must also advance and qualify the runtime to the merged theme
@@ -292,23 +292,66 @@ Test-signing private keys are generated only on the temporary GitHub runner
 and are deleted before artifacts are uploaded. No signing secret or private
 key is stored in the repository.
 
-Official releases use the independent four-part numeric `packageVersion` and
-`releaseTag` from `release-policy.json`. The initial signing proof uses package
-version `0.0.0.0` and tag `v0.0.0.0`; a later policy change can establish the
-long-term Gateway-to-MSIX version mapping. The workflow creates the tag in this
-repository and a GitHub Release with generated release notes. Each release
-contains a signed, multi-architecture
+Official releases derive their GitHub tag and four-part numeric MSIX identity
+from `gatewayTag` and `msixRevision` in `release-policy.json`. The GitHub tag is
+`<gateway-tag>-msix.<revision>`. The MSIX identity is
+`year.month.patch.(gateway-release-sequence * 1000 + msix-revision)`.
+
+| Gateway tag | MSIX revision | GitHub release tag | MSIX version |
+|---|---:|---|---|
+| `v2026.7.1` | `0` | `v2026.7.1-msix.0` | `2026.7.1.1000` |
+| `v2026.7.1-2` | `0` | `v2026.7.1-2-msix.0` | `2026.7.1.2000` |
+| `v2026.7.1-2` | `1` | `v2026.7.1-2-msix.1` | `2026.7.1.2001` |
+| `v2026.7.2` | `0` | `v2026.7.2-msix.0` | `2026.7.2.1000` |
+
+The unsuffixed Gateway tag is release sequence `1`; correction suffixes `-2`
+through `-64` use their numeric suffix as the sequence. A `-1` suffix is
+rejected because it would collide with the unsuffixed tag. Set `msixRevision`
+from `0` through `999`, starting at `0` for each Gateway tag and incrementing it
+only when that exact Gateway tag is repackaged. Each Gateway release therefore
+owns a deterministic 1,000-number block, and an MSIX-only rebuild cannot shift
+the version assigned to a later Gateway correction or patch.
+
+To prepare an official release, update these policy inputs together in a
+reviewed pull request:
+
+1. `gatewayTag` to the stable upstream Gateway tag;
+2. `approvedCommit` to the immutable commit resolved from that tag;
+3. `payloadPackageVersion` to the version reported by the pinned payload;
+4. `msixRevision` to `0`, or increment it for a packaging-only rebuild of the
+   same Gateway tag;
+5. the workflow's `openclaw_ref` default and non-manual fallback to the same
+   `approvedCommit`.
+
+After that pull request merges, manually run **Build OpenClaw Gateway MSIX** on
+`main` with `openclaw_ref` set to the approved commit and `signing_mode` set to
+`official`. The workflow derives the package version and release tag, creates
+the tag in this repository, and publishes a GitHub Release with generated
+release notes. Each release contains a signed, multi-architecture
 `OpenClawGateway-<version>.msixbundle` as the recommended download, plus signed
 `OpenClawGateway-<version>-x64.msix` and
 `OpenClawGateway-<version>-arm64.msix` packages for architecture-specific
 deployment. The duplicate GitHub Actions artifacts remain short-lived transport
 and diagnostic copies.
 
-For the all-zero proof only, MakeAppx assigns the outer bundle identity its
-date/time-based version because it does not preserve `0.0.0.0` as a bundle
-version. The two embedded architecture packages retain identity version
-`0.0.0.0`; signing authorization verifies those versions and byte-compares both
-embedded packages with the approved standalone inputs.
+Microsoft Store submissions reserve the fourth version component as zero, so
+Store publication will need its own version policy when it is introduced.
+
+The signed `v0.0.0.0` and `v0.0.0.1` proof releases are not production version
+identities, but they are retained as transition baselines. Pull requests that
+change release versioning download the hash-pinned standalone x64 and
+recommended `.msixbundle` assets, install each one on a clean GitHub-hosted
+Windows runner, upgrade it in place through the same delivery format, and
+verify that the package family remains stable and a LocalState marker is
+retained. The gate also proves fresh installation of both the standalone and
+bundle candidates. It refuses to run when an OpenClaw Gateway package is
+already registered and removes only packages installed by that test
+invocation. It temporarily trusts the ephemeral test-signing certificate in
+the local-machine Trusted People store, as required by Windows deployment, and
+removes that certificate in `finally`. The resulting JSON evidence is retained
+as a workflow artifact for 90 days. Future versioning schemes must keep this
+transition gate green or explicitly document and obtain approval for a
+breaking reset.
 
 An `.msixbundle` is a single installable container for the x64 and ARM64 MSIX
 packages; Windows selects the package appropriate for the device. An
