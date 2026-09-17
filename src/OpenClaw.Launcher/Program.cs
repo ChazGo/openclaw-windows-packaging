@@ -255,7 +255,11 @@ internal static class Program
         TextWriter output,
         TextWriter error,
         Func<CancellationToken, Task<NodeRuntime>>? resolveNode = null,
-        Func<Session.SessionRuntime>? createSessionRuntime = null)
+        Func<Session.SessionRuntime>? createSessionRuntime = null,
+        Func<CancellationToken, Task<Gateway.GatewayPersistenceInstallResult>>?
+            installRecovery = null,
+        Func<CancellationToken, Task<Gateway.GatewayPersistenceRemovalResult>>?
+            removeRecovery = null)
     {
         Session.SessionRuntime? sessionRuntime = null;
         Session.SessionRuntime GetSessionRuntime() =>
@@ -305,10 +309,25 @@ internal static class Program
                                 GetPackagedNodeArchivePath(options),
                                 cancellationToken)
                             .ConfigureAwait(false);
-                        runtime.CompleteSetup(
-                            record,
-                            agentRuntime,
-                            startupEnabled: false);
+                        Gateway.GatewayPersistenceInstallResult recovery =
+                            installRecovery is null
+                                ? await Gateway.GatewayRuntime.CreateRecoveryManager(log)
+                                    .InstallAsync(cancellationToken)
+                                    .ConfigureAwait(false)
+                                : await installRecovery(cancellationToken)
+                                    .ConfigureAwait(false);
+                        await output.WriteLineAsync(recovery.Message).ConfigureAwait(false);
+                        if (!string.IsNullOrWhiteSpace(recovery.Detail))
+                        {
+                            await output.WriteLineAsync(recovery.Detail).ConfigureAwait(false);
+                        }
+
+                        if (recovery.State != Gateway.GatewayPersistenceState.Ready)
+                        {
+                            return 1;
+                        }
+
+                        runtime.CompleteSetup(record, agentRuntime, startupEnabled: true);
                         await output.WriteLineAsync("OpenClaw isolated session is ready.")
                             .ConfigureAwait(false);
                         return 0;
@@ -348,6 +367,22 @@ internal static class Program
                     Session.SessionRuntime runtime = GetSessionRuntime();
                     using Session.ISessionLockHandle handle =
                         runtime.AcquireLifecycleLock();
+                    Gateway.GatewayPersistenceRemovalResult recoveryRemoval =
+                        removeRecovery is null
+                            ? await Gateway.GatewayRuntime
+                                .CreateRecoveryManager(log)
+                                .UninstallAsync(cancellationToken)
+                                .ConfigureAwait(false)
+                            : await removeRecovery(cancellationToken)
+                                .ConfigureAwait(false);
+                    if (!recoveryRemoval.Succeeded)
+                    {
+                        await error.WriteLineAsync(
+                            $"OpenClaw recovery could not be removed: {recoveryRemoval.Detail}")
+                            .ConfigureAwait(false);
+                        return 1;
+                    }
+
                     await runtime.Coordinator.RemoveAsync(cancellationToken)
                         .ConfigureAwait(false);
                     runtime.GatewayState.Clear();
