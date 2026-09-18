@@ -9,19 +9,19 @@ const COMMAND_GROUPS = [
       {
         id: "agent-shell",
         title: "Agent session PowerShell",
-        description: "Open the agent shell.",
+        description: "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
         command: "clawctl pwsh",
       },
       {
         id: "gateway-status",
         title: "Gateway status",
-        description: "Check the background Gateway.",
+        description: "Show whether the gateway is running.",
         command: "clawctl gateway-service status",
       },
       {
         id: "gateway-restart",
         title: "Restart Gateway",
-        description: "Requires PowerShell 7 on the Gateway host.",
+        description: "Stop, then start the gateway, keeping the session and its data. Requires PowerShell 7 on the Gateway host.",
         command: "clawctl gateway-service stop && clawctl gateway-service start",
       },
       {
@@ -35,7 +35,7 @@ const COMMAND_GROUPS = [
   {
     id: "openclaw",
     title: "OpenClaw",
-    description: "The packaged openclaw command runs the OpenClaw CLI inside your agent session.",
+    description: "The packaged openclaw command forwards to your agent session. Inside clawctl pwsh, it runs directly.",
     commands: [
       {
         id: "terminal",
@@ -46,7 +46,7 @@ const COMMAND_GROUPS = [
       {
         id: "dashboard",
         title: "Dashboard access",
-        description: "Show dashboard access details.",
+        description: "Show the access URL for this dashboard.",
         command: "openclaw dashboard --no-open",
       },
       {
@@ -176,7 +176,8 @@ function renderCommandReferences() {
       </div>
     </section>`;
   }).join("");
-  return `${groups}
+  return `<p class="intro">Run these commands in your normal Windows terminal (user session).</p>
+    ${groups}
     <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>`;
 }
 

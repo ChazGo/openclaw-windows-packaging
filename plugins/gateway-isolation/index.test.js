@@ -173,7 +173,8 @@ test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw seco
   const groups = [...html.matchAll(/<section aria-labelledby="([^"]+)">([\s\S]*?)<\/section>/g)];
   assert.deepEqual(groups.map(match => match[1]), ["clawctl-title", "openclaw-title"]);
   assert.match(groups[0][2], /<h2 id="clawctl-title">ClawCtl<\/h2>/);
-  assert.match(groups[1][2], /<h2 id="openclaw-title">OpenClaw<\/h2>\s*<p class="intro">The packaged openclaw command runs the OpenClaw CLI inside your agent session\.<\/p>/);
+  assert.match(html, /<p class="intro">Run these commands in your normal Windows terminal \(user session\)\.<\/p>\s*<section aria-labelledby="clawctl-title">/);
+  assert.match(groups[1][2], /<h2 id="openclaw-title">OpenClaw<\/h2>\s*<p class="intro">The packaged openclaw command forwards to your agent session\. Inside clawctl pwsh, it runs directly\.<\/p>/);
   for (const [index, expected] of [expectedCommands.slice(0, 4), expectedCommands.slice(4)].entries()) {
     assert.deepEqual(
       [...groups[index][2].matchAll(/<h3>([^<]+)<\/h3>/g)].map(match => match[1]),
@@ -183,12 +184,12 @@ test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw seco
   assert.deepEqual(
     [...html.matchAll(/<p class="command-description">([^<]+)<\/p>/g)].map(match => match[1]),
     [
-      "Open the agent shell.",
-      "Check the background Gateway.",
-      "Requires PowerShell 7 on the Gateway host.",
+      "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
+      "Show whether the gateway is running.",
+      "Stop, then start the gateway, keeping the session and its data. Requires PowerShell 7 on the Gateway host.",
       "List launcher commands.",
       "Chat in the terminal.",
-      "Show dashboard access details.",
+      "Show the access URL for this dashboard.",
       "List OpenClaw commands.",
     ],
   );

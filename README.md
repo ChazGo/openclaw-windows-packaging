@@ -238,15 +238,19 @@ and neutral status-unavailable text (HTTP 503), never a supported off state.
 The live route establishes Gateway availability; disconnected-Gateway messaging
 belongs to the Control UI. There are no isolation controls.
 
-The active page provides a brief, copy-only cheat sheet:
+The active page provides a brief, copy-only cheat sheet. Enter these commands
+in your normal Windows terminal (user session):
 
 - **ClawCtl:** `clawctl pwsh` first, then `clawctl gateway-service status`,
   `clawctl gateway-service stop && clawctl gateway-service start`, and
-  `clawctl --help`. Run ClawCtl on the host. The restart sequence requires
-  PowerShell 7 and starts the Gateway only after a successful stop.
+  `clawctl --help`. PowerShell opens inside the isolated agent, where `openclaw`
+  and `node` are available; ClawCtl manages the session from outside it.
+  The restart sequence preserves the session and its data, requires PowerShell 7,
+  and starts the Gateway only after a successful stop.
 - **OpenClaw:** `openclaw tui`, `openclaw dashboard --no-open`, and
-  `openclaw --help`. The packaged openclaw command runs the OpenClaw CLI
-  inside your agent session.
+  `openclaw --help`. The packaged `openclaw` command forwards to your agent
+  session; inside `clawctl pwsh`, it runs directly. The dashboard reference
+  shows the access URL for this dashboard without opening a browser.
 
 The page never executes commands or sends mutation requests. Copy controls
 announce success only after a clipboard operation succeeds; otherwise they
