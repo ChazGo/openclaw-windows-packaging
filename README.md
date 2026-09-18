@@ -238,25 +238,20 @@ and neutral status-unavailable text (HTTP 503), never a supported off state.
 The live route establishes Gateway availability; disconnected-Gateway messaging
 belongs to the Control UI. There are no isolation controls.
 
-The active page also provides copy-only command references for `clawctl pwsh`,
-`openclaw dashboard --no-open`, `openclaw tui`,
-`clawctl gateway-service status`, a PowerShell 7 restart sequence
-(`clawctl gateway-service stop && clawctl gateway-service start`),
-`openclaw --help`, and `clawctl --help`. The restart sequence manages this
-installation's background Gateway and starts it only after a successful stop;
-an already-stopped Gateway is a successful stop. It is not a native `restart`
-command. OpenClaw help lists top-level commands; individual subcommands have
-their own `--help`, not a recursive `--all` option. The page never executes
-commands or sends mutation requests. Copy controls announce success only after
-a clipboard operation succeeds; otherwise they offer manual-copy guidance,
-leaving the command selected when selection is available. Invalid isolation
-reports show no command references. `clawctl pwsh` opens PowerShell inside the
-configured agent session after setup, with `openclaw` and `node` on PATH; exit
-returns to the host. It prefers machine-wide PowerShell 7 and otherwise uses
-Windows PowerShell. Run ClawCtl from the host, not from inside that shell.
-`openclaw tui` is the Gateway chat terminal UI, not an agent shell.
-ClawCtl has no dashboard command. `openclaw dashboard --no-open` shows dashboard
-access details without trying to launch a browser inside the agent session.
+The active page provides a brief, copy-only cheat sheet:
+
+- **ClawCtl:** `clawctl pwsh` first, then `clawctl gateway-service status`,
+  `clawctl gateway-service stop && clawctl gateway-service start`, and
+  `clawctl --help`. Run ClawCtl on the host. The restart sequence requires
+  PowerShell 7 and starts the Gateway only after a successful stop.
+- **OpenClaw:** `openclaw tui`, `openclaw dashboard --no-open`, and
+  `openclaw --help`. The packaged openclaw command runs the OpenClaw CLI
+  inside your agent session.
+
+The page never executes commands or sends mutation requests. Copy controls
+announce success only after a clipboard operation succeeds; otherwise they
+offer manual-copy guidance, leaving the command selected when possible.
+Invalid isolation reports show no command references.
 
 The report is captured once at plugin creation. It is a launcher-provided
 diagnostic, not independent isolation attestation. The launcher now requires an

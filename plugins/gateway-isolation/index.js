@@ -1,48 +1,61 @@
 const ISOLATION_ENVIRONMENT_VARIABLE = "CLAWCTL_GATEWAY_ISOLATION";
 const STATUS_PATH = "/plugins/gateway-isolation/status";
 const THEME_MESSAGE_TYPE = "openclaw:widget-theme";
-const COMMAND_REFERENCES = [
+const COMMAND_GROUPS = [
   {
-    id: "agent-shell",
-    title: "Agent session PowerShell",
-    description: "Open PowerShell inside the agent session. Requires setup; exit to return.",
-    command: "clawctl pwsh",
+    id: "clawctl",
+    title: "ClawCtl",
+    commands: [
+      {
+        id: "agent-shell",
+        title: "Agent session PowerShell",
+        description: "Open the agent shell.",
+        command: "clawctl pwsh",
+      },
+      {
+        id: "gateway-status",
+        title: "Gateway status",
+        description: "Check the background Gateway.",
+        command: "clawctl gateway-service status",
+      },
+      {
+        id: "gateway-restart",
+        title: "Restart Gateway",
+        description: "Requires PowerShell 7 on the Gateway host.",
+        command: "clawctl gateway-service stop && clawctl gateway-service start",
+      },
+      {
+        id: "launcher-help",
+        title: "Launcher help",
+        description: "List launcher commands.",
+        command: "clawctl --help",
+      },
+    ],
   },
   {
-    id: "dashboard",
-    title: "Dashboard access",
-    description: "Show dashboard access details without opening a browser inside the agent session.",
-    command: "openclaw dashboard --no-open",
-  },
-  {
-    id: "terminal",
-    title: "Gateway chat TUI",
-    description: "Chat with the Gateway in a terminal. This is not an agent shell.",
-    command: "openclaw tui",
-  },
-  {
-    id: "gateway-status",
-    title: "Gateway status",
-    description: "Inspect this installation's background Gateway without changing it.",
-    command: "clawctl gateway-service status",
-  },
-  {
-    id: "gateway-restart",
-    title: "Restart Gateway",
-    description: "Stop the background Gateway, then start it only if stopping succeeds. Keeps the session and its data.",
-    command: "clawctl gateway-service stop && clawctl gateway-service start",
-  },
-  {
-    id: "openclaw-help",
-    title: "OpenClaw help",
-    description: "List top-level OpenClaw commands. Add --help to a subcommand for details.",
-    command: "openclaw --help",
-  },
-  {
-    id: "launcher-help",
-    title: "Launcher help",
-    description: "List ClawCtl commands for managing this installation.",
-    command: "clawctl --help",
+    id: "openclaw",
+    title: "OpenClaw",
+    description: "The packaged openclaw command runs the OpenClaw CLI inside your agent session.",
+    commands: [
+      {
+        id: "terminal",
+        title: "Gateway chat TUI",
+        description: "Chat in the terminal.",
+        command: "openclaw tui",
+      },
+      {
+        id: "dashboard",
+        title: "Dashboard access",
+        description: "Show dashboard access details.",
+        command: "openclaw dashboard --no-open",
+      },
+      {
+        id: "openclaw-help",
+        title: "OpenClaw help",
+        description: "List OpenClaw commands.",
+        command: "openclaw --help",
+      },
+    ],
   },
 ];
 const THEME_BRIDGE_SCRIPT = `<script>
@@ -143,7 +156,8 @@ const COPY_COMMAND_SCRIPT = `<script>
 </script>`;
 
 function renderCommandReferences() {
-  const rows = COMMAND_REFERENCES.map(({ id, title, description, command }) => `
+  const groups = COMMAND_GROUPS.map((group) => {
+    const rows = group.commands.map(({ id, title, description, command }) => `
       <div class="command-row">
         <div>
           <h3>${title}</h3>
@@ -154,14 +168,16 @@ function renderCommandReferences() {
           <button type="button" data-copy-command="command-${id}" data-command-title="${title}" aria-label="Copy ${title} command">Copy</button>
         </div>
       </div>`).join("");
-  return `
-    <section aria-labelledby="commands-title">
-      <h2 id="commands-title">Command reference</h2>
-      <p class="intro">Copy a command to run yourself in PowerShell 7 on the Gateway host. This page never runs commands.</p>
+    return `
+    <section aria-labelledby="${group.id}-title">
+      <h2 id="${group.id}-title">${group.title}</h2>
+      ${group.description ? `<p class="intro">${group.description}</p>` : ""}
       <div class="status-section">${rows}
       </div>
-      <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
     </section>`;
+  }).join("");
+  return `${groups}
+    <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>`;
 }
 
 export function readGatewayIsolationMode(env) {

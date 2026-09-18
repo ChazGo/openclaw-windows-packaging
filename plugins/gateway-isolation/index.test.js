@@ -160,13 +160,39 @@ test("renders one informational Gateway Isolation row with a single active badge
 
 const expectedCommands = [
   ["Agent session PowerShell", "clawctl pwsh"],
-  ["Dashboard access", "openclaw dashboard --no-open"],
-  ["Gateway chat TUI", "openclaw tui"],
   ["Gateway status", "clawctl gateway-service status"],
   ["Restart Gateway", "clawctl gateway-service stop && clawctl gateway-service start"],
-  ["OpenClaw help", "openclaw --help"],
   ["Launcher help", "clawctl --help"],
+  ["Gateway chat TUI", "openclaw tui"],
+  ["Dashboard access", "openclaw dashboard --no-open"],
+  ["OpenClaw help", "openclaw --help"],
 ];
+
+test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw second", () => {
+  const html = renderGatewayIsolationPage("enabled");
+  const groups = [...html.matchAll(/<section aria-labelledby="([^"]+)">([\s\S]*?)<\/section>/g)];
+  assert.deepEqual(groups.map(match => match[1]), ["clawctl-title", "openclaw-title"]);
+  assert.match(groups[0][2], /<h2 id="clawctl-title">ClawCtl<\/h2>/);
+  assert.match(groups[1][2], /<h2 id="openclaw-title">OpenClaw<\/h2>\s*<p class="intro">The packaged openclaw command runs the OpenClaw CLI inside your agent session\.<\/p>/);
+  for (const [index, expected] of [expectedCommands.slice(0, 4), expectedCommands.slice(4)].entries()) {
+    assert.deepEqual(
+      [...groups[index][2].matchAll(/<h3>([^<]+)<\/h3>/g)].map(match => match[1]),
+      expected.map(([title]) => title),
+    );
+  }
+  assert.deepEqual(
+    [...html.matchAll(/<p class="command-description">([^<]+)<\/p>/g)].map(match => match[1]),
+    [
+      "Open the agent shell.",
+      "Check the background Gateway.",
+      "Requires PowerShell 7 on the Gateway host.",
+      "List launcher commands.",
+      "Chat in the terminal.",
+      "Show dashboard access details.",
+      "List OpenClaw commands.",
+    ],
+  );
+});
 
 test("offers only supported general commands with individually named copy controls", () => {
   const html = renderGatewayIsolationPage("enabled");
@@ -176,12 +202,8 @@ test("offers only supported general commands with individually named copy contro
   for (const [index, [title]] of expectedCommands.entries()) {
     assert.ok(html.includes(`data-copy-command="${commands[index][1]}" data-command-title="${title}" aria-label="Copy ${title} command"`));
   }
-  assert.match(html, /PowerShell 7 on the Gateway host/);
-  assert.match(html, /This page never runs commands/);
-  assert.match(html, /only if stopping succeeds/);
-  assert.match(html, /Requires setup; exit to return/);
-  assert.match(html, /This is not an agent shell/);
   assert.match(html, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.equal([...html.matchAll(/id="copy-status"/g)].length, 1);
   assert.match(html, /button:focus-visible/);
   assert.match(html, /@media \(max-width: 620px\)/);
   assert.doesNotMatch(html, /clawctl tui|clawctl tty|clawctl dashboard|gateway-service restart|help --all|--help --all/);
@@ -250,9 +272,10 @@ test("copies every exact command synchronously and announces only successful cop
 for (const legacy of [false, "throw"]) {
   test(`uses Clipboard API when legacy copy returns ${legacy}`, async () => {
     const copy = runCopyScript({ legacy, modern: "success" });
-    await copy.buttons[4].click();
+    const restartIndex = expectedCommands.findIndex(([title]) => title === "Restart Gateway");
+    await copy.buttons[restartIndex].click();
     assert.equal(copy.feedback.textContent, "Copied Restart Gateway command.");
-    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[4][1]]);
+    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[restartIndex][1]]);
   });
   for (const modern of ["missing", "reject"]) {
     test(`offers selected manual copy when legacy=${legacy} and modern=${modern}`, async () => {
@@ -453,7 +476,7 @@ for (const mode of invalidModes) {
     assert.match(response.body, /<dt>Gateway Isolation<\/dt>\s*<dd><span class="status status--neutral">Invalid<\/span><\/dd>/);
     assert.doesNotMatch(
       response.body,
-      />Active<|class="status status--ok"|status--warn|<script>alert|<button|<code|clipboard|execCommand|getSelection|createRange|aria-live|id="copy-status"|clawctl|Command reference/,
+      />Active<|class="status status--ok"|status--warn|<script>alert|<button|<code|clipboard|execCommand|getSelection|createRange|aria-live|id="copy-status"|clawctl|Command reference|<section|<h2/i,
     );
     const bridge = runThemeBridge(response.body);
     bridge.listener({
