@@ -257,21 +257,22 @@ processes. It no longer supports host execution or the old `OPENCLAW_SESSION`
 routing preference; that variable is not accepted as a substitute report here.
 This plugin change does not enable the tab or alter launcher execution.
 
-The screenshots attached to the pull request are design and behavior proof
-captured with the plugin explicitly enabled in an isolated validation profile;
-they do not represent the default-disabled state of a normal install.
+Validation explicitly enables the plugin in an isolated profile. Direct-Node
+UI fixtures verify rendering and interactions, not packaged-launcher isolation
+or the default-disabled state of a normal install.
 
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by
 [`openclaw/openclaw#145409`](https://github.com/openclaw/openclaw/pull/145409).
-The current workflow remains on the release-approved OpenClaw `v2026.9.4`
-baseline (`3a9d69db306cd7f081e06254cb89c4bcc14a7107`) while this plugin is disabled by
-default. That baseline packages and inspects the plugin safely but does not
-forward selected Control UI themes into plugin frames. The future launcher
-enablement change must also advance and qualify the runtime to the merged theme
-forwarding commit `f65ecca89667b8a55d9f88d76c487f0a0ab11da8` or newer. Until
-then, the page uses the browser or operating system light/dark preference with
-a safe built-in palette.
+The workflow defaults to the explicitly unreleased development commit
+`44e9347d3342cd8b5e27fec78df40b8dff0dca34`, which includes that forwarding.
+Its package version is still `2026.9.4`; this does not make it a stable release.
+The official approval remains `v2026.9.4` at
+`3a9d69db306cd7f081e06254cb89c4bcc14a7107`, which lacks theme forwarding.
+Qualifying the development runtime does not qualify officially signed production
+packages: those still need a separate stable runtime approval, and the plugin
+remains disabled by default. Without forwarding, the page uses the browser or
+operating system light/dark preference with a safe built-in palette.
 
 `scripts\Build-MSIX.ps1` downloads the official Node.js archive matching the
 payload's recorded build version and architecture, copies both inputs into
@@ -356,6 +357,13 @@ Test-signing private keys are generated only on the temporary GitHub runner
 and are deleted before artifacts are uploaded. No signing secret or private
 key is stored in the repository.
 
+`release-policy.json` may declare a separate immutable `developmentCommit` for
+both workflow defaults. It is not an official signing authorization.
+An `official` run must explicitly override `openclaw_ref` with `approvedCommit`;
+using the unreleased default fails before source resolution or build, with the
+required input shown in the error. Unsigned and test-signed runs can use the
+development default or another explicitly selected ref.
+
 Official releases derive their GitHub tag and four-part numeric MSIX identity
 from `gatewayTag` and `msixRevision` in `release-policy.json`. The GitHub tag is
 `<gateway-tag>-msix.<revision>`. The MSIX identity is
@@ -384,8 +392,8 @@ reviewed pull request:
 3. `payloadPackageVersion` to the version reported by the pinned payload;
 4. `msixRevision` to `0`, or increment it for a packaging-only rebuild of the
    same Gateway tag;
-5. the workflow's `openclaw_ref` default and non-manual fallback to the same
-   `approvedCommit`.
+5. remove the temporary `developmentCommit` override and set the workflow's
+   `openclaw_ref` default and non-manual fallback to the same `approvedCommit`.
 
 After that pull request merges, manually run **Build OpenClaw Gateway MSIX** on
 `main` with `openclaw_ref` set to the approved commit and `signing_mode` set to

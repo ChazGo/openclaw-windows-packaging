@@ -169,6 +169,10 @@ package.
   the reviewed immutable commit and stable or correction tag in
   `release-policy.json`. The tag determines the four-part MSIX identity
   version and the permanent GitHub Release tag.
+  An explicit `developmentCommit` may instead own both workflow defaults;
+  it never authorizes official signing. Official runs must explicitly select
+  `approvedCommit`, and qualification of a development runtime is not proof of
+  officially signed production readiness.
 - The launcher is NativeAOT. `dotnet build` and the xUnit suite exercise a JIT
   build, so run the NativeAOT publish path when changing reflection, interop,
   or trimming-sensitive code.
