@@ -213,6 +213,14 @@ dotnet test .\OpenClaw.Gateway.MSIX.slnx `
   --no-restore
 ```
 
+Payload installation and runtime inspection require Windows and Node.js matching
+the target architecture. CI uses `windows-latest` for x64 and
+`windows-11-vs2026-arm` for ARM64; loading target-native dependencies cannot be
+qualified by cross-compiling them on an x64 host. These jobs validate payload
+loading and packaging, not installed agent-session E2E on a supported host.
+`Build-MSIX.ps1` and `Build-LocalMSIX.ps1 -PayloadDirectory` can still cross-compose
+an already-qualified payload.
+
 `scripts\Build-Payload.ps1` npm-installs an OpenClaw package into an expanded,
 architecture-specific application tree. It validates the Gateway and Control UI
 build identities on the installed tree, including reused staged installs, then

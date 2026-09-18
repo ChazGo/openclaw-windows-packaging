@@ -154,6 +154,10 @@ package.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, payload metadata, and signing
   validation.
+  `Build-Payload.ps1` must install and inspect with matching Windows Node
+  architecture; do not skip activated-plugin checks for cross-builds.
+  Its temporary profile also owns `XDG_CACHE_HOME`, which must be restored.
+  Already-qualified payloads can still be cross-composed into MSIX packages.
 - Do not add a packaging-side Node.js version pin or support-range policy.
   The selected upstream toolchain owns version selection; package composition
   supplies `NodeRuntimeArchiveFileName`, and the host reads the archive name.

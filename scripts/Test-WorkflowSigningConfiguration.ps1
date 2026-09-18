@@ -86,6 +86,24 @@ if (-not $buildMsixJobMatch.Success) {
     throw 'Unable to locate the build-msix workflow job.'
 }
 $buildMsixJob = $buildMsixJobMatch.Groups['job'].Value
+foreach ($fragment in @(
+    'runs-on: ${{ matrix.runner }}'
+    'architecture: ${{ matrix.architecture }}'
+)) {
+    if (-not $buildMsixJob.Contains($fragment, [StringComparison]::Ordinal)) {
+        throw "Payload activation must use the matching runtime architecture: $fragment"
+    }
+}
+foreach ($entry in @(
+    @{ Architecture = 'x64'; Runner = 'windows-latest' }
+    @{ Architecture = 'arm64'; Runner = 'windows-11-vs2026-arm' }
+)) {
+    $pattern = 'architecture:\s*' + $entry.Architecture +
+        '\s+runner:\s*' + [regex]::Escape($entry.Runner) + '\s'
+    if ($buildMsixJob -cnotmatch $pattern) {
+        throw "Missing native $($entry.Architecture) payload runner $($entry.Runner)."
+    }
+}
 if ($buildMsixJob.Contains(
         'name: Download payload',
         [StringComparison]::Ordinal)) {
