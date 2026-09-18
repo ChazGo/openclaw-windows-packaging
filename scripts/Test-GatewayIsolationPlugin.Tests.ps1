@@ -35,7 +35,7 @@ try {
         ConvertFrom-Json
     if (
         $manifest.id -ne 'gateway-isolation' -or
-        $manifest.enabledByDefault -ne $false -or
+        $manifest.enabledByDefault -ne $true -or
         (
             $manifest.PSObject.Properties.Name -contains
             'enabledByDefaultOnPlatforms' -and
@@ -44,7 +44,7 @@ try {
         $manifest.activation.onStartup -ne $true -or
         $manifest.configSchema.additionalProperties -ne $false
     ) {
-        throw 'Gateway isolation plugin manifest is not valid for explicit enablement.'
+        throw 'Gateway isolation plugin manifest is not valid for default startup activation.'
     }
 
     $package = Get-Content `
@@ -70,81 +70,9 @@ try {
         -ItemType Directory `
         -Force |
         Out-Null
-    Set-Content `
-        -LiteralPath (Join-Path $packageSource 'openclaw.mjs') `
-        -Value @'
-const args = process.argv.slice(2);
-const fs = await import("node:fs");
-const path = await import("node:path");
-if (process.env.XDG_CACHE_HOME !== path.join(process.env.OPENCLAW_STATE_DIR, "cache")) {
-  throw new Error("Expected an isolated plugin snapshot cache.");
-}
-fs.mkdirSync(process.env.XDG_CACHE_HOME, { recursive: true });
-fs.writeFileSync(path.join(process.env.XDG_CACHE_HOME, "fixture-cache"), "owned");
-const configPath =
-  process.env.OPENCLAW_CONFIG_PATH ??
-  (process.env.OPENCLAW_STATE_DIR
-    ? path.join(process.env.OPENCLAW_STATE_DIR, "openclaw.json")
-    : undefined);
-if (args[0] === "plugins" && args[1] === "enable") {
-  if (!configPath) {
-    throw new Error("Missing isolated validation configuration path.");
-  }
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(
-    configPath,
-    JSON.stringify({
-      plugins: {
-        entries: {
-          "gateway-isolation": {
-            enabled: true
-          },
-          anthropic: {
-            config: {
-              sessionCatalog: {
-                enabled: false
-              }
-            }
-          },
-          codex: {
-            config: {
-              sessionCatalog: {
-                enabled: false
-              }
-            }
-          }
-        }
-      }
-    }),
-  );
-  process.exit(0);
-}
-
-const enabled = Boolean(configPath) && fs.existsSync(configPath) &&
-  JSON.parse(fs.readFileSync(configPath, "utf8"))
-    .plugins?.entries?.["gateway-isolation"]?.enabled === true;
-const runtime = args.includes("--runtime");
-if (runtime && process.env.OPENCLAW_FIXTURE_FAIL_RUNTIME === "1") {
-  throw new Error("Requested runtime inspection fixture failure.");
-}
-console.log(JSON.stringify({
-  plugin: {
-    id: "gateway-isolation",
-    origin: "bundled",
-    enabled,
-    activated: enabled && runtime,
-    status: enabled && runtime ? "loaded" : "disabled",
-    imported: enabled && runtime,
-    httpRoutes: enabled && runtime ? 1 : 0
-  },
-  httpRouteCount: enabled && runtime ? 1 : 0,
-  gatewayMethods: [],
-  tools: [],
-  services: [],
-  diagnostics: []
-}));
-'@ `
-        -Encoding utf8
+    Copy-Item `
+        -LiteralPath (Join-Path $PSScriptRoot 'fixtures\openclaw-plugin-inspection.mjs') `
+        -Destination (Join-Path $packageSource 'openclaw.mjs')
     Set-Content `
         -LiteralPath (Join-Path $packageSource 'dist\index.js') `
         -Value 'export {};' `
@@ -231,6 +159,11 @@ console.log(JSON.stringify({
             if ($_.Exception.Message -notmatch 'cannot load the Gateway isolation plugin') {
                 throw
             }
+            if ($LASTEXITCODE -ne 1) {
+                throw "Expected the runtime fixture to exit 1, received $LASTEXITCODE."
+            }
+            # The Actions pwsh wrapper propagates native exit codes, including expected failures.
+            $global:LASTEXITCODE = 0
             $inspectionFailed = $true
         }
         if (-not $inspectionFailed -or
@@ -267,7 +200,7 @@ console.log(JSON.stringify({
         ConvertFrom-Json
     if (
         $packagedManifest.id -ne 'gateway-isolation' -or
-        $packagedManifest.enabledByDefault -ne $false -or
+        $packagedManifest.enabledByDefault -ne $true -or
         (
             $packagedManifest.PSObject.Properties.Name -contains
             'enabledByDefaultOnPlatforms' -and

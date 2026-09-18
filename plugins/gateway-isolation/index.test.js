@@ -8,11 +8,11 @@ import {
   renderGatewayIsolationPage,
 } from "./index.js";
 
-test("ships disabled by default while retaining explicit startup activation", () => {
+test("ships enabled by default with startup activation", () => {
   const manifest = JSON.parse(
     fs.readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf8"),
   );
-  assert.equal(manifest.enabledByDefault, false);
+  assert.equal(manifest.enabledByDefault, true);
   assert.equal(manifest.enabledByDefaultOnPlatforms, undefined);
   assert.equal(manifest.activation.onStartup, true);
 });

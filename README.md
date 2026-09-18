@@ -165,11 +165,12 @@ Changing only the workflow-dispatch default does not change automatic builds.
 For a one-time override, run **Build OpenClaw Gateway MSIX** manually and
 provide a tag, branch, or preferably a full 40-character commit SHA in
 `openclaw_ref`. Payload composition validates that the selected OpenClaw
-runtime discovers the packaging-owned Windows Launcher plugin in its
-default-disabled state, then explicitly enables only that plugin in an isolated
-temporary validation profile before using OpenClaw's runtime inspection pass to
-validate its required read-only route shape. The temporary profile is removed
-after inspection and does not modify user configuration. Incompatible older
+runtime discovers and activates the packaging-owned Windows Launcher plugin by
+default, both without configuration and with an existing profile that has no
+plugin decision. Runtime inspection verifies its read-only route shape without
+writing enablement or allowlist overrides, then verifies that an explicit disable
+prevents registration. The isolated temporary profile is removed after inspection
+and does not modify user configuration. Incompatible older
 refs fail instead of producing a package with an unvalidated plugin.
 
 The source build uses that revision's `.github/actions/setup-node-env` action
@@ -226,9 +227,8 @@ architecture-specific application tree. It validates the Gateway and Control UI
 build identities on the installed tree, including reused staged installs, then
 provisions the packaging-owned Windows Launcher plugin into the payload copy's
 bundled plugin directory. Its internal package, path, and plugin ID remain
-`gateway-isolation`. The plugin is disabled by default, so normal installs do
-not activate it, register its route, or show the **Windows Launcher** tab. When
-explicitly enabled, it adds the read-only tab to the Control group and serves it
+`gateway-isolation`. The bundled plugin is enabled by default and adds the
+read-only **Windows Launcher** tab to the Control group, serving it
 through an authenticated, sandboxed plugin route. It reads only the launch-time
 `CLAWCTL_GATEWAY_ISOLATION` value and registers no mutation RPC or process
 control. The informational page shows one **Gateway Isolation** row with an
@@ -263,11 +263,14 @@ diagnostic, not independent isolation attestation. The launcher now requires an
 isolated session and supplies `CLAWCTL_GATEWAY_ISOLATION=enabled` to its guest
 processes. It no longer supports host execution or the old `OPENCLAW_SESSION`
 routing preference; that variable is not accepted as a substitute report here.
-This plugin change does not enable the tab or alter launcher execution.
+The default enables the tab, not isolation, and does not alter launcher execution.
 
-Validation explicitly enables the plugin in an isolated profile. Direct-Node
-UI fixtures verify rendering and interactions, not packaged-launcher isolation
-or the default-disabled state of a normal install.
+Existing profiles without a plugin decision adopt the new default on the next
+normal start of the updated Gateway. No configuration migration or automatic
+restart is added. Explicit user disables, global plugin disablement, denylists,
+and restrictive allowlists retain OpenClaw's standard precedence; the package
+does not rewrite them. Direct-Node UI fixtures verify rendering and interactions,
+not packaged-launcher isolation or installed upgrade behavior.
 
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by
@@ -278,8 +281,8 @@ Its package version is still `2026.9.4`; this does not make it a stable release.
 The official approval remains `v2026.9.4` at
 `3a9d69db306cd7f081e06254cb89c4bcc14a7107`, which lacks theme forwarding.
 Qualifying the development runtime does not qualify officially signed production
-packages: those still need a separate stable runtime approval, and the plugin
-remains disabled by default. Without forwarding, the page uses the browser or
+packages: those still need a separate stable runtime approval. Without
+forwarding, the page uses the browser or
 operating system light/dark preference with a safe built-in palette.
 
 `scripts\Build-MSIX.ps1` downloads the official Node.js archive matching the

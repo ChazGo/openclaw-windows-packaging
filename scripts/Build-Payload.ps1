@@ -163,7 +163,7 @@ $pluginManifest = Get-Content `
     ConvertFrom-Json
 if (
     $pluginManifest.id -ne 'gateway-isolation' -or
-    $pluginManifest.enabledByDefault -ne $false -or
+    $pluginManifest.enabledByDefault -ne $true -or
     (
         $pluginManifest.PSObject.Properties.Name -contains
         'enabledByDefaultOnPlatforms' -and
@@ -171,7 +171,7 @@ if (
     ) -or
     $pluginManifest.activation.onStartup -ne $true
 ) {
-    throw 'Gateway isolation plugin manifest must be packaged but disabled by default.'
+    throw 'Gateway isolation plugin manifest must enable bundled startup activation by default.'
 }
 
 $bundledPluginsDirectory = Join-Path $installedPackage 'dist\extensions'
@@ -212,80 +212,67 @@ try {
     $env:XDG_CACHE_HOME = Join-Path $validationStateDirectory 'cache'
     Push-Location $installedPackage
     try {
-        $defaultInspectionOutput = (
-            & node `
-                .\openclaw.mjs `
-                plugins inspect gateway-isolation `
-                --json
-        ) | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            throw (
-                'The selected OpenClaw payload cannot inspect the packaged ' +
-                "Gateway isolation plugin. Exit code: $LASTEXITCODE."
-            )
+        if (Test-Path -LiteralPath $validationConfigPath) {
+            throw 'Gateway isolation validation requires a fresh, isolated profile.'
         }
-        $defaultInspection = $defaultInspectionOutput | ConvertFrom-Json
-        if (
-            $defaultInspection.plugin.id -ne 'gateway-isolation' -or
-            $defaultInspection.plugin.origin -ne 'bundled' -or
-            $defaultInspection.plugin.enabled -ne $false -or
-            $defaultInspection.plugin.activated -ne $false -or
-            $defaultInspection.plugin.imported -ne $false -or
-            $defaultInspection.plugin.httpRoutes -ne 0 -or
-            $defaultInspection.httpRouteCount -ne 0
-        ) {
-            throw (
-                'The packaged Gateway isolation plugin must remain disabled ' +
-                'and unregistered until it is explicitly enabled.'
-            )
-        }
-
-        & node .\openclaw.mjs plugins enable gateway-isolation
-        if ($LASTEXITCODE -ne 0) {
-            throw (
-                'The selected OpenClaw payload cannot explicitly enable the ' +
-                "Gateway isolation plugin in its isolated validation profile. " +
-                "Exit code: $LASTEXITCODE."
-            )
-        }
-        if (-not (
-            Test-Path `
-                -LiteralPath $validationConfigPath `
-                -PathType Leaf
-        )) {
-            throw (
-                'The selected OpenClaw payload did not create the isolated ' +
-                'Gateway isolation validation configuration.'
-            )
-        }
-        $validationConfig = Get-Content `
-            -LiteralPath $validationConfigPath `
-            -Raw |
-            ConvertFrom-Json
-        $explicitlyEnabledEntryNames = @(
-            foreach (
-                $entry in
-                $validationConfig.plugins.entries.PSObject.Properties
-            ) {
-                if (
-                    $entry.Value.PSObject.Properties.Name -contains 'enabled' -and
-                    $entry.Value.enabled -eq $true
-                ) {
-                    $entry.Name
-                }
+        foreach ($profileKind in @('fresh', 'existing-without-plugin-decision')) {
+            if ($profileKind -eq 'existing-without-plugin-decision') {
+                New-Item -Path $validationStateDirectory -ItemType Directory -Force | Out-Null
+                Set-Content -LiteralPath $validationConfigPath -Value '{}' -Encoding utf8
             }
-        )
-        if (
-            $explicitlyEnabledEntryNames.Count -ne 1 -or
-            $explicitlyEnabledEntryNames[0] -ne 'gateway-isolation'
-        ) {
-            throw (
-                'The isolated validation configuration must explicitly enable ' +
-                'only the Gateway isolation plugin.'
-            )
+            $configHashBefore = if (Test-Path -LiteralPath $validationConfigPath) {
+                (Get-FileHash -LiteralPath $validationConfigPath -Algorithm SHA256).Hash
+            } else { $null }
+            $inspectionOutput = (
+                & node `
+                    .\openclaw.mjs `
+                    plugins inspect gateway-isolation `
+                    --runtime `
+                    --json
+            ) | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                throw (
+                    'The selected OpenClaw payload cannot load the Gateway ' +
+                    "isolation plugin. Exit code: $LASTEXITCODE."
+                )
+            }
+            $inspection = $inspectionOutput | ConvertFrom-Json
+            if (
+                $inspection.plugin.id -ne 'gateway-isolation' -or
+                $inspection.plugin.origin -ne 'bundled' -or
+                $inspection.plugin.enabled -ne $true -or
+                $inspection.plugin.explicitlyEnabled -ne $false -or
+                $inspection.plugin.activationSource -ne 'default' -or
+                $inspection.plugin.activated -ne $true -or
+                $inspection.plugin.status -ne 'loaded' -or
+                $inspection.plugin.imported -ne $true -or
+                $inspection.plugin.httpRoutes -ne 1 -or
+                $inspection.httpRouteCount -ne 1 -or
+                @($inspection.gatewayMethods).Count -ne 0 -or
+                @($inspection.tools).Count -ne 0 -or
+                @($inspection.services).Count -ne 0 -or
+                @($inspection.diagnostics).Count -ne 0
+            ) {
+                throw (
+                    'The selected OpenClaw payload must activate the bundled ' +
+                    "Gateway isolation plugin by default ($profileKind), " +
+                    'with the required read-only runtime shape.'
+                )
+            }
+            $configHashAfter = if (Test-Path -LiteralPath $validationConfigPath) {
+                (Get-FileHash -LiteralPath $validationConfigPath -Algorithm SHA256).Hash
+            } else { $null }
+            if ($configHashBefore -cne $configHashAfter) {
+                throw 'Default plugin inspection must not create or change user configuration.'
+            }
         }
 
-        $inspectionOutput = (
+        Set-Content `
+            -LiteralPath $validationConfigPath `
+            -Value '{"plugins":{"entries":{"gateway-isolation":{"enabled":false}}}}' `
+            -Encoding utf8
+        $disabledConfigHash = (Get-FileHash -LiteralPath $validationConfigPath -Algorithm SHA256).Hash
+        $disabledInspectionOutput = (
             & node `
                 .\openclaw.mjs `
                 plugins inspect gateway-isolation `
@@ -294,9 +281,24 @@ try {
         ) | Out-String
         if ($LASTEXITCODE -ne 0) {
             throw (
-                'The selected OpenClaw payload cannot load the Gateway ' +
-                "isolation plugin. Exit code: $LASTEXITCODE."
+                'The selected OpenClaw payload cannot inspect an explicitly ' +
+                "disabled Gateway isolation plugin. Exit code: $LASTEXITCODE."
             )
+        }
+        $disabledInspection = $disabledInspectionOutput | ConvertFrom-Json
+        if (
+            $disabledInspection.plugin.id -ne 'gateway-isolation' -or
+            $disabledInspection.plugin.origin -ne 'bundled' -or
+            $disabledInspection.plugin.enabled -ne $false -or
+            $disabledInspection.plugin.activated -ne $false -or
+            $disabledInspection.plugin.imported -ne $false -or
+            $disabledInspection.plugin.httpRoutes -ne 0 -or
+            $disabledInspection.httpRouteCount -ne 0 -or
+            $disabledConfigHash -cne (
+                Get-FileHash -LiteralPath $validationConfigPath -Algorithm SHA256
+            ).Hash
+        ) {
+            throw 'An explicit user disable must remain unchanged and prevent plugin registration.'
         }
 
         & node .\openclaw.mjs --version
@@ -306,28 +308,6 @@ try {
     }
     finally {
         Pop-Location
-    }
-
-    $inspection = $inspectionOutput | ConvertFrom-Json
-    if (
-        $inspection.plugin.id -ne 'gateway-isolation' -or
-        $inspection.plugin.origin -ne 'bundled' -or
-        $inspection.plugin.enabled -ne $true -or
-        $inspection.plugin.activated -ne $true -or
-        $inspection.plugin.status -ne 'loaded' -or
-        $inspection.plugin.imported -ne $true -or
-        $inspection.plugin.httpRoutes -ne 1 -or
-        $inspection.httpRouteCount -ne 1 -or
-        @($inspection.gatewayMethods).Count -ne 0 -or
-        @($inspection.tools).Count -ne 0 -or
-        @($inspection.services).Count -ne 0 -or
-        @($inspection.diagnostics).Count -ne 0
-    ) {
-        throw (
-            'The selected OpenClaw payload did not inspect the explicitly ' +
-            'enabled Gateway isolation plugin with the required read-only ' +
-            'runtime shape.'
-        )
     }
 }
 finally {
