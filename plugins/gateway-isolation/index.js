@@ -160,7 +160,7 @@ function renderCommandReferences() {
     const rows = group.commands.map(({ id, title, description, command }) => `
       <div class="command-row">
         <div>
-          <h3>${title}</h3>
+          <h4>${title}</h4>
           <p class="command-description">${description}</p>
         </div>
         <div class="command">
@@ -170,13 +170,14 @@ function renderCommandReferences() {
       </div>`).join("");
     return `
     <section aria-labelledby="${group.id}-title">
-      <h2 id="${group.id}-title">${group.title}</h2>
+      <h3 id="${group.id}-title" class="command-group-title">${group.title}</h3>
       ${group.description ? `<p class="intro">${group.description}</p>` : ""}
       <div class="status-section">${rows}
       </div>
     </section>`;
   }).join("");
-  return `<p class="intro">Run these commands in your normal Windows terminal (user session).</p>
+  return `<h2 class="command-reference-title">Command reference</h2>
+    <p class="intro">Run these commands in your normal Windows terminal (user session).</p>
     ${groups}
     <p id="copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>`;
 }
@@ -293,7 +294,9 @@ function renderStatusPage(enabled) {
     .status--ok { color: var(--ok-text); background: var(--ok-bg); }
     .status--neutral { color: var(--muted); }
     h2 { margin: 28px 0 8px; color: var(--text-strong); font-size: 17px; }
-    h3 { margin: 0; color: var(--text-strong); font-size: 14px; font-weight: 600; }
+    .command-reference-title { font-size: 20px; }
+    .command-group-title { margin: 20px 0 8px; color: var(--text-strong); font-size: 17px; font-weight: 600; }
+    .command-row h4 { margin: 0; color: var(--text-strong); font-size: 14px; font-weight: 600; }
     .command-row {
       display: grid;
       grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr);

@@ -170,14 +170,25 @@ const expectedCommands = [
 
 test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw second", () => {
   const html = renderGatewayIsolationPage("enabled");
+  assert.deepEqual(
+    [...html.matchAll(/<h([1-6])(?: [^>]*)?>([^<]+)<\/h\1>/g)].map(match => [Number(match[1]), match[2]]),
+    [
+      [1, "Windows Launcher"],
+      [2, "Command reference"],
+      [3, "ClawCtl"],
+      ...expectedCommands.slice(0, 4).map(([title]) => [4, title]),
+      [3, "OpenClaw"],
+      ...expectedCommands.slice(4).map(([title]) => [4, title]),
+    ],
+  );
   const groups = [...html.matchAll(/<section aria-labelledby="([^"]+)">([\s\S]*?)<\/section>/g)];
   assert.deepEqual(groups.map(match => match[1]), ["clawctl-title", "openclaw-title"]);
-  assert.match(groups[0][2], /<h2 id="clawctl-title">ClawCtl<\/h2>/);
-  assert.match(html, /<p class="intro">Run these commands in your normal Windows terminal \(user session\)\.<\/p>\s*<section aria-labelledby="clawctl-title">/);
-  assert.match(groups[1][2], /<h2 id="openclaw-title">OpenClaw<\/h2>\s*<p class="intro">The packaged openclaw command forwards to your agent session\. Inside clawctl pwsh, it runs directly\.<\/p>/);
+  assert.match(groups[0][2], /<h3 id="clawctl-title" class="command-group-title">ClawCtl<\/h3>/);
+  assert.match(html, /<h2 class="command-reference-title">Command reference<\/h2>\s*<p class="intro">Run these commands in your normal Windows terminal \(user session\)\.<\/p>\s*<section aria-labelledby="clawctl-title">/);
+  assert.match(groups[1][2], /<h3 id="openclaw-title" class="command-group-title">OpenClaw<\/h3>\s*<p class="intro">The packaged openclaw command forwards to your agent session\. Inside clawctl pwsh, it runs directly\.<\/p>/);
   for (const [index, expected] of [expectedCommands.slice(0, 4), expectedCommands.slice(4)].entries()) {
     assert.deepEqual(
-      [...groups[index][2].matchAll(/<h3>([^<]+)<\/h3>/g)].map(match => match[1]),
+      [...groups[index][2].matchAll(/<h4>([^<]+)<\/h4>/g)].map(match => match[1]),
       expected.map(([title]) => title),
     );
   }

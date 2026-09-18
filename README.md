@@ -238,7 +238,8 @@ and neutral status-unavailable text (HTTP 503), never a supported off state.
 The live route establishes Gateway availability; disconnected-Gateway messaging
 belongs to the Control UI. There are no isolation controls.
 
-The active page provides a brief, copy-only cheat sheet. Enter these commands
+The active page's **Command reference** section provides a brief, copy-only
+cheat sheet grouped under **ClawCtl** and **OpenClaw**. Enter these commands
 in your normal Windows terminal (user session):
 
 - **ClawCtl:** `clawctl pwsh` first, then `clawctl gateway-service status`,
