@@ -123,8 +123,7 @@ internal static class Program
         try
         {
             WriteDiagnostic($"Host started through the {commandName} entrypoint.");
-            if (startup.Entrypoint == HostEntrypoint.Control &&
-                ReferenceEquals(startup.Output, Console.Out) &&
+            if (startup.UsesProcessConsoleWriters &&
                 WindowsHostConsole.Instance.IsInteractive)
             {
                 consoleRestore = WindowsHostConsole.Instance.Capture(WriteDiagnostic);
@@ -149,7 +148,10 @@ internal static class Program
                     startup.InstallationLifecycle is null
                         ? null
                         : startup.InstallationLifecycle.CreateRuntime,
-                    readEnvironmentVariable: startup.ReadEnvironmentVariable)
+                    readEnvironmentVariable: startup.ReadEnvironmentVariable,
+                    error: error,
+                    errorIsProcessConsoleWriter:
+                        startup.UsesProcessConsoleWriters ? () => true : null)
                     .ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -278,7 +280,13 @@ internal static class Program
         Func<CancellationToken, Task<Mxc.MxcReadinessReport>>? probeReadiness = null,
         Func<string?>? getPackageFamilyName = null,
         Func<string, string?>? readEnvironmentVariable = null,
-        Func<bool>? isInteractive = null)
+        Func<bool>? isInteractive = null,
+        TextWriter? error = null,
+        Func<string>? getLogonSessionId = null,
+        TimeProvider? clock = null,
+        Func<bool>? errorIsProcessConsoleWriter = null,
+        Func<bool>? errorIsInteractive = null,
+        Func<bool>? supportsUnicode = null)
     {
         string applicationDirectory = GetPackagedApplicationDirectory(options);
         log("Using the OpenClaw application directly from the package.");
@@ -297,7 +305,12 @@ internal static class Program
                 .ConfigureAwait(false);
         string agentNodePath = runtime.RequireAgentNodePath(
             GetPackagedNodeArchivePath(options));
-        return await runtime.Executor.ExecuteAsync(
+        bool interactive =
+            (isInteractive ?? (() => WindowsHostConsole.Instance.IsInteractive))();
+        TextWriter errorWriter = error ?? Console.Error;
+        Func<string, string?> environmentReader =
+            readEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        int exitCode = await runtime.Executor.ExecuteAsync(
             record,
             new Session.SessionExecutionRequest(
                 runtime.RequireStagedHelper(record),
@@ -307,10 +320,67 @@ internal static class Program
                 record.WorkspacePath!)
             {
                 AdditionalEnvironment = OpenClawRuntimeEnvironment.Build(
-                    (isInteractive ?? (() => WindowsHostConsole.Instance.IsInteractive))(),
-                    readEnvironmentVariable ?? Environment.GetEnvironmentVariable)
+                    interactive,
+                    environmentReader)
             },
             CancellationToken.None).ConfigureAwait(false);
+        Gateway.GatewayController gateway = Gateway.GatewayRuntime
+            .Create(options, runtime.Paths, runtime, log, clock)
+            .Controller;
+        var guidance = new Gateway.AgentGatewayGuidance(
+            runtime.LifecycleLock,
+            cancellationToken => runtime.Executor.CheckConfigReadinessAsync(
+                record,
+                runtime.RequireStagedHelper(record),
+                cancellationToken),
+            cancellationToken => gateway.GetStatusAsync(
+                runtime.HelperPath,
+                cancellationToken),
+            new Gateway.GatewayGuidanceStateStore(
+                runtime.Paths.GatewayGuidanceStatePath),
+            getLogonSessionId ?? Gateway.WindowsLogonSession.GetCurrentId,
+            log,
+            clock,
+            target =>
+            {
+                bool selectedStreamIsInteractive =
+                    errorIsInteractive?.Invoke() ??
+                    WindowsHostConsole.Instance.IsInteractiveOutput(target);
+                bool processConsoleWriter =
+                    errorIsProcessConsoleWriter?.Invoke() ??
+                    ReferenceEquals(target, Console.Error);
+                IDisposable? restore = null;
+                bool useColor = ClawCtlColorPolicy.PrepareForegroundOutput(
+                    noColor: false,
+                    json: false,
+                    processConsoleWriter,
+                    interactive,
+                    selectedStreamIsInteractive,
+                    environmentReader,
+                    () => WindowsHostConsole.Instance.TryEnableVirtualTerminalProcessing(
+                        target,
+                        log,
+                        out restore));
+                bool useUnicode = supportsUnicode?.Invoke() ??
+                    (interactive && Console.OutputEncoding.CodePage == 65001);
+                log(
+                    $"Gateway hint capabilities: interactive={interactive}, " +
+                    $"processStderr={processConsoleWriter}, " +
+                    $"stderrConsole={selectedStreamIsInteractive}, " +
+                    $"color={useColor}, unicode={useUnicode}.");
+                using (restore)
+                {
+                    ClawCtlConsole.WriteGatewayHint(
+                        target,
+                        useColor,
+                        useUnicode);
+                }
+            });
+        await guidance.EvaluateAsync(
+            exitCode,
+            interactive,
+            errorWriter).ConfigureAwait(false);
+        return exitCode;
     }
 
     // output and error are required parameters (not Console defaults) so tests
@@ -324,7 +394,9 @@ internal static class Program
         TextWriter error,
         Session.IInstallationLifecycle? installationLifecycle = null,
         Func<string, string?>? readEnvironmentVariable = null,
-        ClawCtlOutputOptions? controlOutputOptions = null)
+        ClawCtlOutputOptions? controlOutputOptions = null,
+        Func<string>? getLogonSessionId = null,
+        TimeProvider? clock = null)
     {
         Session.IInstallationLifecycle lifecycle =
             installationLifecycle ?? Session.InstallationLifecycle.Production;
@@ -430,13 +502,21 @@ internal static class Program
                     Gateway.GatewayPersistenceStatus recovery = await lifecycle
                         .GetRecoveryStatusAsync(log, cancellationToken)
                         .ConfigureAwait(false);
+                    Session.AgentConfigReadinessStatus? configReadiness =
+                        gateway.State == Gateway.GatewayState.Running
+                            ? null
+                            : await Session.AgentConfigReadinessProbe.CheckAsync(
+                                runtime,
+                                status,
+                                cancellationToken).ConfigureAwait(false);
                     Session.SetupStateResult setup =
                         runtime.SetupState.Read(runtime.ApplicationId);
                     return WriteResult(new StatusCommandResult(
                         status,
                         gateway,
                         recovery,
-                        setup.Record?.AgentNodeVersion));
+                        setup.Record?.AgentNodeVersion,
+                        configReadiness));
                 },
                 CollectLogs = async (requestedPath, cancellationToken) =>
                 {
@@ -478,12 +558,36 @@ internal static class Program
                     options,
                     GetSessionRuntime(),
                     cancellationToken),
-                GatewayStart = async cancellationToken =>
+                GatewayStart = async (recovery, cancellationToken) =>
                 {
                     Session.SessionRuntime runtime = GetSessionRuntime();
+                    bool retainedRecoveryInvocation =
+                        !recovery &&
+                        runtime.Paths.PackageFamilyName is string packageFamilyName &&
+                        Gateway.GatewayLauncherScript.UpgradeLegacyActivationScript(
+                            Path.ChangeExtension(
+                                runtime.Paths.GatewayLauncherPath,
+                                ".ps1"),
+                            packageFamilyName,
+                            log);
                     Gateway.GatewayController controller = Gateway.GatewayRuntime
-                        .Create(options, runtime.Paths, runtime, log)
+                        .Create(options, runtime.Paths, runtime, log, clock)
                         .Controller;
+                    if (!recovery && !retainedRecoveryInvocation)
+                    {
+                        new Gateway.AgentGatewayGuidance(
+                            runtime.LifecycleLock,
+                            _ => throw new InvalidOperationException(
+                                "Manual acknowledgement must not check config readiness."),
+                            _ => throw new InvalidOperationException(
+                                "Manual acknowledgement must not inspect the gateway."),
+                            new Gateway.GatewayGuidanceStateStore(
+                                runtime.Paths.GatewayGuidanceStatePath),
+                            getLogonSessionId ?? Gateway.WindowsLogonSession.GetCurrentId,
+                            log,
+                            clock)
+                            .AcknowledgeManualStart();
+                    }
 
                     // Narration is human guidance, so it is off whenever the
                     // caller asked for a document: stdout carries exactly one
@@ -513,10 +617,28 @@ internal static class Program
                 },
                 GatewayStatus = async cancellationToken =>
                 {
-                    Gateway.GatewayRuntime runtime = Gateway.GatewayRuntime.Create(options, log);
+                    Session.SessionRuntime sessionRuntime = GetSessionRuntime();
+                    Gateway.GatewayRuntime runtime = Gateway.GatewayRuntime.Create(
+                        options,
+                        sessionRuntime.Paths,
+                        sessionRuntime,
+                        log);
                     Gateway.GatewayStatusReport result = await runtime.Controller
-                        .GetStatusAsync(GetSessionRuntime().HelperPath, cancellationToken)
+                        .GetStatusAsync(sessionRuntime.HelperPath, cancellationToken)
                         .ConfigureAwait(false);
+                    Session.AgentConfigReadinessStatus? configReadiness = null;
+                    if (result.State != Gateway.GatewayState.Running)
+                    {
+                        Session.SessionStatus session = await sessionRuntime.Coordinator
+                            .ProbeRecordedStatusAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                        configReadiness =
+                            await Session.AgentConfigReadinessProbe.CheckAsync(
+                                sessionRuntime,
+                                session,
+                                cancellationToken).ConfigureAwait(false);
+                    }
+
                     int? port = result.Record?.ObservedPorts is { Count: 1 }
                         ? result.Record.ObservedPorts[0]
                         : null;
@@ -527,9 +649,10 @@ internal static class Program
                         result.Detail,
                         result.State is Gateway.GatewayState.Running or
                             Gateway.GatewayState.NotStarted
-                            ? 0
+                            ? configReadiness?.ProbeFailed == true ? 1 : 0
                             : 1,
-                        port));
+                        port,
+                        Readiness: configReadiness));
                 },
                 GatewayStop = async cancellationToken =>
                 {

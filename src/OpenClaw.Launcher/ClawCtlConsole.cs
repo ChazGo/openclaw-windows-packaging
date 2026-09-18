@@ -1,4 +1,5 @@
 using System.Globalization;
+using OpenClaw.SessionProtocol;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 
@@ -75,6 +76,27 @@ internal static class ClawCtlConsole
         {
             output.WriteLine(literalLine);
         }
+    }
+
+    internal static void WriteGatewayHint(
+        TextWriter output,
+        bool useColor = false,
+        bool? useUnicode = null)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        bool unicode = useUnicode ?? SupportsUnicode(output);
+        var paragraph = new Paragraph();
+        if (unicode)
+        {
+            paragraph.Append($"{IdentityMark} ", WarningStyle);
+        }
+
+        paragraph.Append("Hint:", WarningStyle);
+        paragraph.Append(" The OpenClaw gateway is not running. Run ");
+        paragraph.Append("clawctl gateway-service start", AccentStyle);
+        paragraph.Append(" to start it.");
+        Render(output, paragraph, useColor, unicode);
     }
 
     internal static void WriteVersion(TextWriter output, bool useColor = false)
@@ -391,6 +413,8 @@ internal static class ClawCtlConsole
             view.Detail(result.Gateway.Detail);
         }
 
+        WriteReadiness(view, result.Readiness);
+
         view.Row("Recovery", DescribeRecovery(view, result.Recovery));
         if (!string.IsNullOrWhiteSpace(result.Recovery.Detail))
         {
@@ -514,6 +538,8 @@ internal static class ClawCtlConsole
             view.Detail(explanation);
         }
 
+        WriteReadiness(view, result.Readiness);
+
         // Reaching the Control UI needs the shared token, and the command that
         // reveals it belongs to OpenClaw rather than to this package.
         if (result.State == Gateway.GatewayState.Running && result.Port is not null)
@@ -523,10 +549,61 @@ internal static class ClawCtlConsole
         }
 
         if (result.State == Gateway.GatewayState.NotStarted &&
-            result.Action == "status")
+            result.Action == "status" &&
+            result.Readiness?.State ==
+                Session.AgentConfigReadinessState.StartupEligible)
         {
             view.Blank();
             view.Command("Run", "clawctl gateway-service start");
+        }
+    }
+
+    private static void WriteReadiness(
+        ResultView view,
+        Session.AgentConfigReadinessStatus? readiness)
+    {
+        if (readiness is null)
+        {
+            return;
+        }
+
+        view.Row("Readiness", readiness.State switch
+        {
+            Session.AgentConfigReadinessState.Absent =>
+                Status(view, StatusKind.Neutral, "not configured"),
+            Session.AgentConfigReadinessState.NotReady =>
+                Status(view, StatusKind.Warning, "not ready"),
+            Session.AgentConfigReadinessState.StartupEligible =>
+                Status(view, StatusKind.Success, "startup eligible"),
+            Session.AgentConfigReadinessState.Unavailable =>
+                Status(view, StatusKind.Neutral, "unavailable"),
+            _ => Status(
+                view,
+                readiness.ProbeFailed ? StatusKind.Failure : StatusKind.Warning,
+                "unknown")
+        });
+
+        string? detail = readiness.Reason switch
+        {
+            SessionConfigReadinessReason.ConfigFileMissing =>
+                "the default config file is missing",
+            SessionConfigReadinessReason.ConfigFileUnreadable =>
+                "the default config file could not be read",
+            SessionConfigReadinessReason.ConfigFileInvalid =>
+                "the default config file is invalid",
+            SessionConfigReadinessReason.GatewayMissing =>
+                "the config has no gateway object",
+            SessionConfigReadinessReason.GatewayModeMissing =>
+                "gateway.mode is missing",
+            SessionConfigReadinessReason.GatewayModeNotLocal =>
+                "gateway.mode is not local",
+            SessionConfigReadinessReason.GatewayModeLocal =>
+                "gateway.mode is local",
+            _ => readiness.Detail
+        };
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+            view.Detail(detail);
         }
     }
 

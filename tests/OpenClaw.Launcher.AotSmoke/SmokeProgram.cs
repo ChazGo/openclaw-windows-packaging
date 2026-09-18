@@ -48,6 +48,7 @@ internal static class SmokeProgram
             ("version JSON survives NativeAOT", VersionJsonIsStructuredAsync),
             ("Spectre renders clawctl output under NativeAOT", SpectreOutputRenders),
             ("gateway narration survives NativeAOT", GatewayNarrationRenders),
+            ("Windows logon identity survives NativeAOT", WindowsLogonIdentityWorks),
             ("missing application reports diagnostics", MissingApplicationReportsAsync),
             ("openclaw never parses its arguments", AgentNeverParsesItsArgumentsAsync)
         ];
@@ -66,6 +67,7 @@ internal static class SmokeProgram
                 await runAsync().ConfigureAwait(false);
                 WriteLine($"  ok    {name}");
             }
+
             catch (Exception exception)
             {
                 failures++;
@@ -82,6 +84,16 @@ internal static class SmokeProgram
 
         WriteLine($"{scenarios.Length} NativeAOT scenarios passed.");
         return 0;
+    }
+
+    private static Task WindowsLogonIdentityWorks()
+    {
+        string id = WindowsLogonSession.GetCurrentId();
+        Assert(
+            id.Length == 17 && id[8] == ':' &&
+            id.Where(character => character != ':').All(Uri.IsHexDigit),
+            $"Unexpected Windows logon identity '{id}'.");
+        return Task.CompletedTask;
     }
 
     // The management entrypoint is selected from the native command line. This
@@ -341,6 +353,43 @@ internal static class SmokeProgram
         Assert(
             failure.ToString().Contains("no package identity.", StringComparison.Ordinal),
             "The note callout did not render its message.");
+
+        using var hint = new StringWriter();
+        ClawCtlConsole.WriteGatewayHint(
+            hint,
+            useColor: true,
+            useUnicode: true);
+        string visibleHint = StripAnsi(hint.ToString());
+        Assert(
+            visibleHint.Contains("\U0001f980 Hint:", StringComparison.Ordinal) &&
+            visibleHint.Contains(
+                "Run clawctl gateway-service start",
+                StringComparison.Ordinal) &&
+            !visibleHint.Contains(
+                "'clawctl gateway-service start'",
+                StringComparison.Ordinal),
+            "The colored gateway hint lost its branding or command formatting.");
+
+        using var readinessJson = new StringWriter();
+        ClawCtlJson.WriteResult(
+            readinessJson,
+            new GatewayCommandResult(
+                "status",
+                GatewayState.NotStarted,
+                "No gateway has been started.",
+                null,
+                0,
+                Readiness: new AgentConfigReadinessStatus(
+                    AgentConfigReadinessState.StartupEligible)));
+        using JsonDocument readinessDocument =
+            JsonDocument.Parse(readinessJson.ToString());
+        Assert(
+            readinessDocument.RootElement
+                .GetProperty("gateway")
+                .GetProperty("readiness")
+                .GetProperty("state")
+                .GetString() == "startup-eligible",
+            "The readiness JSON projection did not survive NativeAOT.");
         return Task.CompletedTask;
     }
 

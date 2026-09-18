@@ -110,8 +110,43 @@ public sealed class GatewayPersistenceManagerTests : IDisposable
         Assert.Contains("chcp 65001", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("OpenClaw.Gateway_test!Control", activation, StringComparison.Ordinal);
         Assert.Contains("ActivateApplication", activation, StringComparison.Ordinal);
-        Assert.Contains("gateway-service start", activation, StringComparison.Ordinal);
+        Assert.Contains(
+            "gateway-service start --recovery",
+            activation,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("WindowsApps", launcher + activation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LegacyActivationUpgradeDoesNotOverwriteModifiedContent()
+    {
+        await CreateManager().InstallAsync(CancellationToken.None);
+        string modified =
+            (await File.ReadAllTextAsync(
+                ActivationScriptPath,
+                CancellationToken.None))
+            .Replace(
+                GatewayLauncherScript.ControlArguments,
+                "gateway-service start",
+                StringComparison.Ordinal) +
+            "# user edit";
+        await File.WriteAllTextAsync(
+            ActivationScriptPath,
+            modified,
+            CancellationToken.None);
+
+        bool legacyInvocation =
+            GatewayLauncherScript.UpgradeLegacyActivationScript(
+                ActivationScriptPath,
+                "OpenClaw.Gateway_test",
+                _ => { });
+
+        Assert.False(legacyInvocation);
+        Assert.Equal(
+            modified,
+            await File.ReadAllTextAsync(
+                ActivationScriptPath,
+                CancellationToken.None));
     }
 
     [Fact]
