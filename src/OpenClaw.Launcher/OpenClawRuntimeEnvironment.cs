@@ -16,6 +16,28 @@ internal static class OpenClawRuntimeEnvironment
     public const string NoAutoUpdateVariable = "OPENCLAW_NO_AUTO_UPDATE";
     public const string GatewayIsolationVariable = "CLAWCTL_GATEWAY_ISOLATION";
 
+    /// <summary>
+    /// The packaged application root whose native dependency packages were
+    /// mirrored, and the agent-owned root holding those copies.
+    /// </summary>
+    /// <remarks>
+    /// Read by the packaged redirect preload. The agent identity cannot map
+    /// packaged files as executable images, so native addons must resolve to
+    /// the staged copies instead.
+    /// </remarks>
+    public const string NativeApplicationRootVariable = "OPENCLAW_NATIVE_APP_ROOT";
+    public const string NativeStagedRootVariable = "OPENCLAW_NATIVE_STAGED_ROOT";
+
+    public const string NodeOptionsVariable = "NODE_OPTIONS";
+
+    /// <summary>
+    /// Directory holding the packaged Node.js redirect preload, relative to
+    /// the application base.
+    /// </summary>
+    public const string NodeScriptDirectoryName = "node";
+
+    public const string NativeRedirectFileName = "native-redirect.mjs";
+
     public const string ExternalValue = "external";
     public const string NoAutoUpdateValue = "1";
 
@@ -100,6 +122,58 @@ internal static class OpenClawRuntimeEnvironment
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds the variables that point OpenClaw's Node.js processes at the
+    /// staged native dependency packages.
+    /// </summary>
+    /// <remarks>
+    /// The preload that reads them is not here. It belongs in
+    /// <c>NODE_OPTIONS</c>, which the agent account owns; see
+    /// <see cref="BuildNativeRedirectNodeOption"/>.
+    /// </remarks>
+    public static IReadOnlyDictionary<string, string> BuildNativeRedirect(
+        string applicationDirectory,
+        string stagedRootPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stagedRootPath);
+
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [NativeApplicationRootVariable] = applicationDirectory,
+            [NativeStagedRootVariable] = stagedRootPath,
+        };
+    }
+
+    /// <summary>
+    /// Builds the Node.js option that loads the native dependency redirect.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Delivered through <c>NODE_OPTIONS</c> rather than the command line
+    /// because OpenClaw starts its own Node.js workers and child services,
+    /// which inherit the environment but not this process's arguments. Those
+    /// children load the same native addons, so the redirect has to reach them
+    /// too.
+    /// </para>
+    /// <para>
+    /// Only the option is produced here. Appending it to an existing
+    /// <c>NODE_OPTIONS</c> happens where the agent's process environment is
+    /// built, because this process's own <c>NODE_OPTIONS</c> belongs to the
+    /// invoking host and says nothing about the agent's.
+    /// </para>
+    /// <para>
+    /// The preload is named as a percent-encoded file URL, which keeps the
+    /// space in "Program Files" out of the option string.
+    /// </para>
+    /// </remarks>
+    public static string BuildNativeRedirectNodeOption(string preloadPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(preloadPath);
+
+        return $"--import {new Uri(preloadPath).AbsoluteUri}";
     }
 
     /// <summary>

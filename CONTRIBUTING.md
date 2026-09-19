@@ -188,7 +188,17 @@ bypassable, and required CI checks remain authoritative.
   directly. `clawctl setup` owns session provisioning and writes the setup
   marker that `openclaw` requires. Node.js is installed into the agent
   account's profile by the session host, not into package LocalState; do not
-  copy the OpenClaw application payload or use device-installed Node.js.
+  copy the OpenClaw application payload or use device-installed Node.js. The
+  one exception is narrow and deliberate: the isolated-session identity cannot
+  map packaged files as executable images, so `clawctl setup` mirrors the
+  dependency packages that carry native artifacts into agent LocalState and
+  redirects resolution to them. That set is discovered by scanning, never
+  hard-coded, and everything else keeps executing from the package. The agent
+  account owns its own `PATH` and `NODE_OPTIONS`: name the directory or the
+  option in the launch request and let the guest compose them, because
+  host-supplied environment values are assigned over the agent's. Reclaim a
+  staged root only when nothing is running from it; every launch holds its root
+  for its lifetime, and a held root is left whole for a later setup.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, and signing validation.
 - Metadata files are part of the release trust chain. Coordinate changes across

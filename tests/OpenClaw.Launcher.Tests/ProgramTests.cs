@@ -294,6 +294,82 @@ public sealed class ProgramTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The host never composes the agent's <c>NODE_OPTIONS</c>. It names the
+    /// preload, and the guest appends it to whatever the agent already set, so
+    /// settings such as <c>--max-old-space-size</c> survive setup and the
+    /// host's own value never reaches the agent.
+    /// </summary>
+    [Fact]
+    public async Task AgentLaunchNamesTheNativeRedirectWithoutSettingNodeOptions()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        HostOptions setupOptions = CreateSetupOptions(applicationDirectory);
+        SessionRuntime runtime = CreateSessionRuntime();
+        int setupExitCode = await Program.RunControlAsync(
+            setupOptions,
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: new FailingFreshLifecycle(runtime) { TeardownSucceeds = true });
+        Assert.Equal(0, setupExitCode);
+
+        // Stands in for a setup that staged native packages.
+        string nativeRoot = Path.Combine(_testDirectory, "agent-native", "0123456789abcdef");
+        Directory.CreateDirectory(nativeRoot);
+        SetupRecord staged = runtime.SetupState.Read(runtime.ApplicationId).Record!;
+        runtime.SetupState.Write(staged with { AgentNativeRoot = nativeRoot });
+
+        SessionLaunchRequest? launched = null;
+        _lastSessionBackend!.AttachedBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            launched = request;
+
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.SerializeResult(new SessionLaunchResult
+                {
+                    RequestId = request.RequestId,
+                    Launched = true,
+                    ExitCode = 0,
+                }));
+            return Task.FromResult(0);
+        };
+
+        await Program.RunAgentAsync(
+            new HostOptions(
+                applicationDirectory,
+                setupOptions.PackagedNodeArchivePath,
+                ["doctor"]),
+            _ => { },
+            _ => runtime,
+            probeReadiness: SupportedHost,
+            getPackageFamilyName: () => runtime.Paths.PackageFamilyName,
+            readEnvironmentVariable: name =>
+                name == OpenClawRuntimeEnvironment.NodeOptionsVariable
+                    ? "--host-only-flag"
+                    : null).ConfigureAwait(true);
+
+        Assert.NotNull(launched);
+        Assert.Contains(
+            OpenClawRuntimeEnvironment.NativeRedirectFileName,
+            launched.NodeOptionsSuffix,
+            StringComparison.Ordinal);
+        Assert.Equal(nativeRoot, launched.NativeRootPath);
+
+        // The assigned environment must not carry NODE_OPTIONS at all: it
+        // would replace the agent's, and the host's value is not the agent's.
+        Assert.False(
+            launched.Environment!.ContainsKey(
+                OpenClawRuntimeEnvironment.NodeOptionsVariable));
+    }
+
     [Fact]
     public async Task AgentControlCExitsSilentlyWithPortableInterruptedCode()
     {
