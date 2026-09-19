@@ -40,7 +40,8 @@ internal sealed record StatusCommandResult(
     SessionStatus Session,
     GatewayStatusReport Gateway,
     GatewayPersistenceStatus Recovery,
-    string? NodeVersion) : IClawCtlResult
+    string? NodeVersion,
+    AgentConfigReadinessStatus? Readiness = null) : IClawCtlResult
 {
     public string Command => "status";
 
@@ -51,7 +52,8 @@ internal sealed record StatusCommandResult(
             SessionAvailability.Unusable ||
         Gateway.State is GatewayState.Unhealthy or GatewayState.Unknown ||
         Recovery.State is GatewayPersistenceState.ActionRequired or
-            GatewayPersistenceState.Unknown
+            GatewayPersistenceState.Unknown ||
+        Readiness?.ProbeFailed == true
             ? 1
             : 0;
 }
@@ -78,7 +80,9 @@ internal sealed record GatewayCommandResult(
     string Message,
     string? Detail,
     int ExitCode,
-    int? Port = null) : IClawCtlResult
+    int? Port = null,
+    string? Url = null,
+    AgentConfigReadinessStatus? Readiness = null) : IClawCtlResult
 {
     public string Command => $"gateway-service {Action}";
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using OpenClaw.SessionProtocol;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 
@@ -75,6 +76,108 @@ internal static class ClawCtlConsole
         {
             output.WriteLine(literalLine);
         }
+    }
+
+    internal static void WriteGatewayHint(
+        TextWriter output,
+        bool useColor = false,
+        bool? useUnicode = null)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        bool unicode = useUnicode ?? SupportsUnicode(output);
+        var paragraph = new Paragraph();
+        if (unicode)
+        {
+            paragraph.Append($"{IdentityMark} ", WarningStyle);
+        }
+
+        paragraph.Append("Hint:", WarningStyle);
+        paragraph.Append(" The OpenClaw gateway is not running. Run ");
+        paragraph.Append("clawctl gateway-service start", AccentStyle);
+        paragraph.Append(" to start it.");
+        Render(output, paragraph, useColor, unicode);
+    }
+
+    internal static void WriteVersion(TextWriter output, bool useColor = false)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        var view = new ResultView(
+            SupportsUnicode(output),
+            ClawCtlBuildMetadata.PackageVersion,
+            ResolveWidth(output));
+        view.Row(
+            "Package",
+            VersionValue(
+                ClawCtlBuildMetadata.PackageVersion,
+                ClawCtlBuildMetadata.PackageCommit));
+        view.Row(
+            "Payload",
+            VersionValue(
+                ClawCtlBuildMetadata.PayloadVersion,
+                ClawCtlBuildMetadata.PayloadCommit));
+        Render(output, view.Build(), useColor, view.Unicode);
+    }
+
+    // The version is what a user compares; the commit is what support pastes
+    // into a bug. Keeping the commit on the same row as a muted parenthetical
+    // says that without spending a second label on it.
+    private static Paragraph VersionValue(string version, string commit)
+    {
+        var paragraph = new Paragraph();
+        paragraph.Append(version);
+        paragraph.Append($" ({commit})", MutedStyle);
+        return paragraph;
+    }
+
+    internal static void WriteHelp(
+        TextWriter output,
+        ClawCtlHelpModel model,
+        bool useColor = false)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(model);
+
+        var view = new ResultView(
+            SupportsUnicode(output),
+            model.CommandPath,
+            ResolveWidth(output));
+
+        if (!string.IsNullOrWhiteSpace(model.Description))
+        {
+            foreach (string paragraph in model.Description.Split(
+                $"{Environment.NewLine}{Environment.NewLine}",
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                view.Line(paragraph);
+                view.Blank();
+            }
+        }
+
+        view.Row("Usage", new Text(model.Usage));
+
+        if (model.Commands.Count > 0)
+        {
+            view.Blank();
+            view.Line("Commands");
+            foreach (ClawCtlHelpEntry entry in model.Commands)
+            {
+                view.Term(entry.Term, entry.Description);
+            }
+        }
+
+        if (model.Options.Count > 0)
+        {
+            view.Blank();
+            view.Line("Options");
+            foreach (ClawCtlHelpEntry entry in model.Options)
+            {
+                view.Term(entry.Term, entry.Description);
+            }
+        }
+
+        Render(output, view.Build(), useColor, view.Unicode);
     }
 
     internal static void WriteUnexpectedFailure(
@@ -297,10 +400,20 @@ internal static class ClawCtlConsole
         }
 
         view.Row("Gateway", DescribeGateway(view, result.Gateway));
+        if (Gateway.GatewayAddress.ResolvePort(result.Gateway.Record) is int statusPort &&
+            result.Gateway.State == Gateway.GatewayState.Running)
+        {
+            view.Row(
+                "Port",
+                new Text(statusPort.ToString(CultureInfo.InvariantCulture)));
+        }
+
         if (!string.IsNullOrWhiteSpace(result.Gateway.Detail))
         {
             view.Detail(result.Gateway.Detail);
         }
+
+        WriteReadiness(view, result.Readiness);
 
         view.Row("Recovery", DescribeRecovery(view, result.Recovery));
         if (!string.IsNullOrWhiteSpace(result.Recovery.Detail))
@@ -386,21 +499,37 @@ internal static class ClawCtlConsole
     {
         view.Row("Gateway", result.State switch
         {
-            Gateway.GatewayState.Running => Status(view, StatusKind.Success, "running"),
+            Gateway.GatewayState.Running => Status(view, StatusKind.Success, "listening"),
             Gateway.GatewayState.NotStarted => Status(view, StatusKind.Neutral, "not started"),
-            Gateway.GatewayState.Stopped => Status(view, StatusKind.Success, "stopped"),
+
+            // Stopping on purpose is a success; a start that ends stopped means
+            // the gateway exited while coming up, which is a failure wearing
+            // the same state.
+            Gateway.GatewayState.Stopped => result.Action switch
+            {
+                "stop" => Status(view, StatusKind.Success, "stopped"),
+                "start" => Status(view, StatusKind.Failure, "exited during startup"),
+                _ => Status(view, StatusKind.Neutral, "stopped")
+            },
             Gateway.GatewayState.Starting => Status(view, StatusKind.Warning, "starting"),
             Gateway.GatewayState.Unhealthy => Status(view, StatusKind.Failure, "unhealthy"),
             _ => Status(view, StatusKind.Warning, "unknown")
         });
 
-        if (result.Port is not null)
+        if (result.Url is not null)
+        {
+            view.Row("URL", new Text(result.Url));
+        }
+        else if (result.Port is not null)
         {
             view.Row(
                 "Port",
                 new Text(result.Port.Value.ToString(CultureInfo.InvariantCulture)));
         }
 
+        // The message explains an outcome the state word cannot. It is
+        // redundant once the gateway is listening, because the row already
+        // says so, but it is the only account of why a start did not succeed.
         string? explanation = string.IsNullOrWhiteSpace(result.Detail)
             ? result.State == Gateway.GatewayState.Running ? null : result.Message
             : result.Detail;
@@ -409,11 +538,72 @@ internal static class ClawCtlConsole
             view.Detail(explanation);
         }
 
+        WriteReadiness(view, result.Readiness);
+
+        // Reaching the Control UI needs the shared token, and the command that
+        // reveals it belongs to OpenClaw rather than to this package.
+        if (result.State == Gateway.GatewayState.Running && result.Port is not null)
+        {
+            view.Blank();
+            view.Command("Token", "openclaw gateway auth-token --show");
+        }
+
         if (result.State == Gateway.GatewayState.NotStarted &&
-            result.Action == "status")
+            result.Action == "status" &&
+            result.Readiness?.State ==
+                Session.AgentConfigReadinessState.StartupEligible)
         {
             view.Blank();
             view.Command("Run", "clawctl gateway-service start");
+        }
+    }
+
+    private static void WriteReadiness(
+        ResultView view,
+        Session.AgentConfigReadinessStatus? readiness)
+    {
+        if (readiness is null)
+        {
+            return;
+        }
+
+        view.Row("Readiness", readiness.State switch
+        {
+            Session.AgentConfigReadinessState.Absent =>
+                Status(view, StatusKind.Neutral, "not configured"),
+            Session.AgentConfigReadinessState.NotReady =>
+                Status(view, StatusKind.Warning, "not ready"),
+            Session.AgentConfigReadinessState.StartupEligible =>
+                Status(view, StatusKind.Success, "startup eligible"),
+            Session.AgentConfigReadinessState.Unavailable =>
+                Status(view, StatusKind.Neutral, "unavailable"),
+            _ => Status(
+                view,
+                readiness.ProbeFailed ? StatusKind.Failure : StatusKind.Warning,
+                "unknown")
+        });
+
+        string? detail = readiness.Reason switch
+        {
+            SessionConfigReadinessReason.ConfigFileMissing =>
+                "the default config file is missing",
+            SessionConfigReadinessReason.ConfigFileUnreadable =>
+                "the default config file could not be read",
+            SessionConfigReadinessReason.ConfigFileInvalid =>
+                "the default config file is invalid",
+            SessionConfigReadinessReason.GatewayMissing =>
+                "the config has no gateway object",
+            SessionConfigReadinessReason.GatewayModeMissing =>
+                "gateway.mode is missing",
+            SessionConfigReadinessReason.GatewayModeNotLocal =>
+                "gateway.mode is not local",
+            SessionConfigReadinessReason.GatewayModeLocal =>
+                "gateway.mode is local",
+            _ => readiness.Detail
+        };
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+            view.Detail(detail);
         }
     }
 
@@ -634,7 +824,15 @@ internal static class ClawCtlConsole
         public bool Unicode { get; } = unicode;
 
         public void Row(string label, IRenderable value) =>
-            _items.Add(Item.ForRow(label, value));
+            _items.Add(Item.ForRow($"{label}:", new Text($"{label}:"), value));
+
+        // A help term is something the user types, so it takes the same accent
+        // as a next-action command rather than a label's plain foreground.
+        public void Term(string term, string? description) =>
+            _items.Add(Item.ForRow(
+                term,
+                new Text(term, AccentStyle),
+                description is null ? Text.Empty : new Text(description)));
 
         public void Command(string label, string command) =>
             Row(label, new Text(command, AccentStyle));
@@ -645,7 +843,10 @@ internal static class ClawCtlConsole
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                _items.Add(Item.ForRow(null, new Text(LowercaseFirst(line), MutedStyle)));
+                _items.Add(Item.ForRow(
+                    string.Empty,
+                    Text.Empty,
+                    new Text(LowercaseFirst(line), MutedStyle)));
             }
         }
 
@@ -675,9 +876,9 @@ internal static class ClawCtlConsole
             int labelWidth = 0;
             foreach (Item item in _items)
             {
-                if (item.Label is not null)
+                if (item.ColumnText is not null)
                 {
-                    labelWidth = Math.Max(labelWidth, item.Label.Length + 1);
+                    labelWidth = Math.Max(labelWidth, item.ColumnText.Length + 1);
                 }
             }
 
@@ -700,9 +901,7 @@ internal static class ClawCtlConsole
                     blocks.Add(grid);
                 }
 
-                grid.AddRow(
-                    item.Label is null ? Text.Empty : new Text($"{item.Label}:"),
-                    item.Value!);
+                grid.AddRow(item.Column!, item.Value!);
             }
 
             var heading = new Paragraph();
@@ -711,8 +910,12 @@ internal static class ClawCtlConsole
                 heading.Append($"{IdentityMark} ");
             }
 
-            heading.Append("clawctl ", MutedStyle);
-            heading.Append(command, AccentStyle);
+            heading.Append(HostEntrypointResolver.ControlCommandName, MutedStyle);
+            if (!string.IsNullOrEmpty(command))
+            {
+                heading.Append(" ");
+                heading.Append(command, AccentStyle);
+            }
 
             return new Rows(
                 heading,
@@ -722,23 +925,26 @@ internal static class ClawCtlConsole
 
         private readonly struct Item
         {
-            private Item(string? label, IRenderable? value, IRenderable? free)
+            private Item(string? columnText, IRenderable? column, IRenderable? value, IRenderable? free)
             {
-                Label = label;
+                ColumnText = columnText;
+                Column = column;
                 Value = value;
                 Free = free;
             }
 
-            public string? Label { get; }
+            public string? ColumnText { get; }
+
+            public IRenderable? Column { get; }
 
             public IRenderable? Value { get; }
 
             public IRenderable? Free { get; }
 
-            public static Item ForRow(string? label, IRenderable value) =>
-                new(label, value, null);
+            public static Item ForRow(string columnText, IRenderable column, IRenderable value) =>
+                new(columnText, column, value, null);
 
-            public static Item ForFree(IRenderable free) => new(null, null, free);
+            public static Item ForFree(IRenderable free) => new(null, null, null, free);
         }
     }
 }

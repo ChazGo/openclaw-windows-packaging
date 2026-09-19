@@ -21,6 +21,10 @@ should describe that environment in terms an operator can act on, while
   presents onboarding as mandatory nor launches it automatically.
 - End neutral states with the command that moves the user forward, such as
   `Run: clawctl setup`.
+- When a gateway is not running, show the file-only agent config readiness
+  immediately after the gateway row. Suggest `clawctl gateway-service start`
+  only when readiness is `startup eligible`; absent, incomplete, unavailable,
+  and unknown config states need diagnosis or configuration instead.
 - Keep a successful `clawctl pwsh` launch silent so the user reaches the shell
   prompt directly. Its help text explains which commands are available inside
   the session.
@@ -31,6 +35,14 @@ Prefer keeping package paths, sandbox identifiers, process identifiers, and
 other non-actionable implementation details out of human output. Preserve them
 in structured output and diagnostics when they are useful for automation or
 support.
+
+The post-OpenClaw gateway hint is a package-owned status surface even though it
+is written after upstream output. On an interactive invocation it uses the crab
+mark, warning-colored `Hint:`, and an accent-colored unquoted command. Resolve
+foreground eligibility separately from the selected stderr handle: an
+app-execution-alias proxy can carry ANSI without supporting console-mode
+changes, while a native console handle still requires VT setup. Whole-command
+redirection, CI, and `NO_COLOR` remain plain; `FORCE_COLOR` remains authoritative.
 
 ## Failures and diagnostics
 
@@ -47,6 +59,53 @@ capture diagnostics and where to report the problem:
 commands should not expose individual log paths when the bundle can collect the
 same evidence. Its final bundle path is emitted as an exact standalone line,
 outside a width-constrained grid, so it remains copyable.
+
+## Help
+
+Help is rendered by `clawctl`, not by System.CommandLine, so it uses the same
+heading, grid, and palette as every other command. The built-in help action is
+sealed and exposes only a wrap width, so replacing the action is the supported
+extension point; the version action is replaced for a related reason.
+
+`ClawCtlHelp` describes the command the user asked about by walking the live
+tree, so a command added to `ClawCtlCommandLine` appears in help with no edit
+here. Three obligations come with that:
+
+- Give every command and option a description. An entry without one renders as
+  a blank column.
+- Honor `Hidden`. The library's renderer filters hidden symbols and so must
+  this one.
+- Report inherited recursive options. `--json` and `--no-color` are declared
+  once on the root and apply to every command, so subcommand help lists them;
+  `--version` is not recursive and must not appear.
+
+Never take the command name from `RootCommand.Name`. It defaults to the entry
+assembly, which is the test host under `dotnet test` and the scenario driver
+under the NativeAOT suite. Use the known control command name instead.
+
+## Progress
+
+A lifecycle command that waits should say what it is waiting for. Report
+progress as semantic stages from the operation and let the renderer present
+them; an operation that writes to a console cannot also run from a logon task,
+where nothing is watching.
+
+Use a spinner only on an interactive console that has already been cleared for
+color, and plain stage lines everywhere else, so redirected output and log files
+stay readable. Spectre serializes live displays: finish the status before
+rendering the result, and never open a second live surface inside the first.
+Narration and a JSON document share standard output, so narration is off
+entirely under `--json`.
+
+## Addresses
+
+Report a gateway port only when it can be identified unambiguously from the
+configured port and observed listeners. Never use the upstream default as an
+observation, and report no port when multiple unclassified listeners remain.
+
+Do not construct a Control UI or WebSocket URL. OpenClaw owns TLS and Control UI
+base-path configuration, so a locally assembled URL can point to the wrong
+scheme or path. Human and JSON output follow the same port-only contract.
 
 ## Color
 
@@ -70,8 +129,8 @@ the label alone.
 | Error, note border | `#ed1805` |
 
 Color supplements text and status marks; it never carries meaning by itself.
-Keep the text obtained after removing ANSI escape sequences identical to
-ordinary non-color output.
+Do not color JSON. Keep the text obtained after removing ANSI escape sequences
+identical to ordinary non-color output.
 
 Build values with `Paragraph.Append`, never by interpolating caller text into
 markup: package paths and error messages contain `[` and `\`, which Spectre

@@ -69,6 +69,21 @@ shared session workspace. It does not stage the application tree. The helper
 has distinct modes for launching a request, inspecting processes/listeners,
 installing the agent runtime, and collecting requested diagnostics.
 
+The helper also exposes an internal `--check-config <request-path>` mode used by
+the launcher after packaged `openclaw` calls. It resolves the agent account's default
+`.openclaw\openclaw.json` and classifies the file as `Absent`, `NotReady`, or
+`StartupEligible` without starting Node.js or OpenClaw. This is deliberately a
+file-only heuristic for the default OpenClaw-generated config:
+`StartupEligible` means only that the file can be parsed and contains
+`gateway.mode` set exactly to `local`. It does not resolve alternate profiles,
+includes, environment substitution, secrets, plugins, bind/auth policy, ports,
+or any other runtime dependency, and therefore does not claim that a gateway
+will start or remain healthy.
+
+On the local win-x64 NativeAOT publish, ten direct helper invocations took
+53.5-108.9 ms (59.15 ms median), including process startup and file inspection
+but excluding the MXC round trip. No invocation started Node.js or OpenClaw.
+
 Opening the agent shell with `clawctl pwsh` installs an ASCII `openclaw.cmd`
 shim in the shared workspace: `RunPowerShellAsync` calls `InstallToolsAsync`.
 Setup alone does not guarantee that shim exists. The shim reads its Node.js and
@@ -103,6 +118,37 @@ owned by that process or one of its descendants. A missing record is
 `NotStarted`; a stale record is `Stopped`; a live but non-serving recorded
 process is `Unhealthy`; and failed inspection is `Unknown` to avoid starting a
 second gateway beside one that could still be healthy.
+
+Both `clawctl status` and `clawctl gateway-service status` add the helper's
+file-only config readiness whenever the managed gateway is not confirmed
+running. The gateway-only command first observes gateway state, then starts
+only an already-recorded session when necessary to reach the helper; it never
+provisions a replacement or starts the gateway. Human output reports
+`not configured`, `not ready`, `startup eligible`, `unavailable`, or `unknown`.
+Structured output carries the same state under `gateway.readiness` with the
+stable reason. A running gateway omits readiness and avoids the helper call.
+
+After an `openclaw` child exits, the launcher uses the helper's file-only
+readiness result before checking the managed gateway record and liveness. A
+successful interactive call gets a start suggestion only for `NotStarted` or
+`Stopped`; unsuccessful or redirected calls, and `Starting`, `Unhealthy`, or
+`Unknown` gateway states, remain silent. The advisory path cannot change the
+OpenClaw exit code.
+
+The suggestion remains eligible until a manual
+`clawctl gateway-service start` invocation or an observed `Running` state.
+Acknowledgement is package-local and keyed to the Windows token authentication
+ID, so it suppresses later checks only for the current Windows logon. The
+sign-in recovery command carries a hidden provenance marker and does not count
+as a manual acknowledgement; a later OpenClaw invocation that observes its
+running gateway does.
+
+Agent entrypoint startup captures and restores console state and initializes
+UTF-8 just as the control entrypoint does. Postflight rendering treats
+foreground interactivity and stderr's native console capability separately:
+the app-alias stderr proxy can receive ANSI and the crab glyph without
+supporting `GetConsoleMode`, while a native console still requires successful
+VT enablement.
 
 ## Diagnostics and safe collection
 

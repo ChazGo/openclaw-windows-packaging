@@ -17,6 +17,16 @@ internal sealed record SessionExecutionRequest(
     /// Environment determined by the host entrypoint for this invocation.
     /// </summary>
     public IReadOnlyDictionary<string, string>? AdditionalEnvironment { get; init; }
+
+    /// <summary>
+    /// Node.js options the agent appends to its own <c>NODE_OPTIONS</c>.
+    /// </summary>
+    public string? NodeOptionsSuffix { get; init; }
+
+    /// <summary>
+    /// The staged native dependency root this launch resolves addons through.
+    /// </summary>
+    public string? NativeRootPath { get; init; }
 }
 
 /// <summary>
@@ -46,6 +56,22 @@ internal sealed record SessionCommandRequest(
     /// see a variable that only the shell's shim needs.
     /// </remarks>
     public IReadOnlyDictionary<string, string>? AdditionalEnvironment { get; init; }
+
+    /// <summary>
+    /// Node.js options the agent appends to its own <c>NODE_OPTIONS</c>.
+    /// </summary>
+    /// <remarks>
+    /// Named rather than merged into <see cref="AdditionalEnvironment"/>
+    /// because that dictionary is assigned over the agent's environment, and
+    /// the host's own <c>NODE_OPTIONS</c> is not the agent's.
+    /// </remarks>
+    public string? NodeOptionsSuffix { get; init; }
+
+    /// <summary>
+    /// The staged native dependency root this command resolves addons through,
+    /// held open by the guest for the command's lifetime.
+    /// </summary>
+    public string? NativeRootPath { get; init; }
 }
 
 /// <summary>
@@ -110,7 +136,9 @@ internal sealed class SessionExecutor
                 PathPrefix = nodeDirectory,
                 AdditionalEnvironment = MergeEnvironment(
                     environment,
-                    request.AdditionalEnvironment)
+                    request.AdditionalEnvironment),
+                NodeOptionsSuffix = request.NodeOptionsSuffix,
+                NativeRootPath = request.NativeRootPath
             },
             "Running OpenClaw in the isolated session.",
             "OpenClaw",
@@ -150,6 +178,8 @@ internal sealed class SessionExecutor
             Environment = MergeEnvironment(
                 _buildEnvironment(), request.AdditionalEnvironment),
             PathPrefix = request.PathPrefix,
+            NodeOptionsSuffix = request.NodeOptionsSuffix,
+            NativeRootPath = request.NativeRootPath,
         };
 
         try
@@ -262,6 +292,66 @@ internal sealed class SessionExecutor
         }
     }
 
+    public async Task<SessionConfigReadinessResult> CheckConfigReadinessAsync(
+        SessionRecord record,
+        string helperPath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentException.ThrowIfNullOrWhiteSpace(helperPath);
+
+        string requestId = _createRequestId();
+        using var operation = new SessionWorkspaceOperation(record, _isCurrentRecord);
+        string requestPath = operation.FilePath("config-readiness", requestId);
+        string resultPath = SessionLaunchProtocol.ResultPathFor(requestPath);
+
+        try
+        {
+            await operation.WriteTextNewAsync(
+                requestPath,
+                SessionConfigReadinessProtocol.SerializeRequest(
+                    new SessionConfigReadinessRequest { RequestId = requestId }),
+                cancellationToken).ConfigureAwait(false);
+
+            _log("Checking agent-side OpenClaw config readiness.");
+            MxcExecutionResult execution = await _backend.ExecuteAsync(
+                record.ToSandboxIdOrThrow(),
+                new MxcExecutionRequest(
+                    BuildGuestCommandLine(helperPath, requestPath, "--check-config")),
+                null,
+                cancellationToken).ConfigureAwait(false);
+
+            string resultText;
+            try
+            {
+                resultText = await operation.ReadTextAsync(resultPath, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (
+                exception is FileNotFoundException or DirectoryNotFoundException or IOException)
+            {
+                throw new SessionException(
+                    "The isolated session did not report config readiness " +
+                    DescribeMissingResult(execution));
+            }
+
+            SessionConfigReadinessResult result =
+                SessionConfigReadinessProtocol.ReadResult(resultText, requestId);
+            if (result.Error is { Length: > 0 } error)
+            {
+                throw new SessionException(
+                    $"The isolated session could not check config readiness: {error}");
+            }
+
+            return result;
+        }
+        finally
+        {
+            operation.Delete(requestPath);
+            operation.Delete(resultPath);
+        }
+    }
+
     /// <summary>
     /// Installs the packaged Node.js runtime into the agent's profile.
     /// </summary>
@@ -273,11 +363,13 @@ internal sealed class SessionExecutor
         SessionRecord record,
         string helperPath,
         string archivePath,
+        string applicationDirectory,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(record);
         ArgumentException.ThrowIfNullOrWhiteSpace(helperPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationDirectory);
 
         string requestId = _createRequestId();
         using var operation = new SessionWorkspaceOperation(record, _isCurrentRecord);
@@ -291,7 +383,8 @@ internal sealed class SessionExecutor
                 SessionRuntimeProtocol.SerializeRequest(new SessionRuntimeInstallRequest
                 {
                     RequestId = requestId,
-                    ArchivePath = archivePath
+                    ArchivePath = archivePath,
+                    ApplicationDirectory = applicationDirectory
                 }),
                 cancellationToken).ConfigureAwait(false);
 

@@ -211,12 +211,44 @@ internal sealed partial class GatewayRuntime
             new SessionGatewayClient(
                 session.Backend,
                 log,
+                buildEnvironment: BuildGatewayEnvironment,
+                buildNodeOptionsSuffix: BuildGatewayNodeOptionsSuffix,
+                getNativeRootPath: session.GetAgentNativeRoot,
                 isCurrentRecord: IsCurrentSessionRecord),
             session.GatewayState,
             CreateRequestAsync,
             log,
             session.RequireSetup,
             session.LifecycleLock);
+
+        // The gateway is a long-lived Node.js process that loads the same
+        // native addons as a foreground launch, so it needs the same redirect.
+        IReadOnlyDictionary<string, string> BuildGatewayEnvironment()
+        {
+            IReadOnlyDictionary<string, string> environment =
+                OpenClawRuntimeEnvironment.Build();
+            if (options.PackagedApplicationDirectory is not { Length: > 0 } applicationDirectory ||
+                session.GetAgentNativeRoot() is not { Length: > 0 } nativeRoot)
+            {
+                return environment;
+            }
+
+            return SessionExecutor.MergeEnvironment(
+                environment,
+                OpenClawRuntimeEnvironment.BuildNativeRedirect(
+                    applicationDirectory,
+                    nativeRoot));
+        }
+
+        // The preload is named, not merged into the environment above: the
+        // agent's NODE_OPTIONS is the agent's, and this process's is the
+        // invoking host's.
+        string? BuildGatewayNodeOptionsSuffix() =>
+            options.PackagedApplicationDirectory is { Length: > 0 } &&
+                session.GetAgentNativeRoot() is { Length: > 0 }
+                ? OpenClawRuntimeEnvironment.BuildNativeRedirectNodeOption(
+                    Program.ResolveNativeRedirectPreloadPath())
+                : null;
 
         bool IsCurrentSessionRecord(SessionRecord record)
         {

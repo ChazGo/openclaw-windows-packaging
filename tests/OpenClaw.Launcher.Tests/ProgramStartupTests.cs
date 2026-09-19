@@ -17,6 +17,12 @@ public sealed class ProgramStartupTests : IDisposable
     }
 
     [Fact]
+    public void ProductionStartupIdentifiesItsProcessConsoleWriters()
+    {
+        Assert.True(HostStartup.CreateProduction().UsesProcessConsoleWriters);
+    }
+
+    [Fact]
     public async Task StartupWritesRecordsToTheSuppliedDiagnosticLog()
     {
         using var output = new StringWriter();
@@ -95,6 +101,128 @@ public sealed class ProgramStartupTests : IDisposable
         Assert.Throws<ObjectDisposedException>(() => diagnostics.Write("after return"));
     }
 
+    [Fact]
+    public async Task JsonFailureStillExitsWhenStandardOutputFails()
+    {
+        using var error = new StringWriter();
+        var output = new UnavailableTextWriter(new IOException("stdout is unavailable"));
+        string logPath = Path.Combine(_testDirectory, "logs", "openclaw.log");
+        HostDiagnosticLog diagnostics = HostDiagnosticLog.Create(logPath);
+        HostStartup startup = new()
+        {
+            Entrypoint = HostEntrypoint.Control,
+            CreateDiagnostics = () => diagnostics,
+            BaseDirectory = _testDirectory,
+            Output = output,
+            Error = error
+        };
+
+        int exitCode = await Program.RunAsync(["setup", "--json"], startup);
+
+        Assert.Equal(1, exitCode);
+        string log = await File.ReadAllTextAsync(logPath);
+        Assert.Contains("Unhandled failure", log, StringComparison.Ordinal);
+        Assert.Contains(
+            "Failure output to standard output failed: IOException.",
+            log,
+            StringComparison.Ordinal);
+        Assert.Throws<ObjectDisposedException>(() => diagnostics.Write("after return"));
+    }
+
+    [Theory]
+    [InlineData("status --json", "status")]
+    [InlineData("--json status", "status")]
+    [InlineData("gateway-service start --json", "gateway-service start")]
+    public async Task JsonOperationalFailurePreservesTheSelectedCommand(
+        string commandLine,
+        string expectedCommand)
+    {
+        string[] args = commandLine.Split(' ');
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        string logPath = Path.Combine(_testDirectory, "logs", $"{Guid.NewGuid():N}.log");
+
+        int exitCode = await Program.RunAsync(args, CreateStartup(logPath, output, error));
+
+        Assert.Equal(1, exitCode);
+        using System.Text.Json.JsonDocument document =
+            System.Text.Json.JsonDocument.Parse(output.ToString());
+        Assert.Equal(expectedCommand, document.RootElement.GetProperty("command").GetString());
+    }
+
+    [Theory]
+    [InlineData("--json=true", true)]
+    [InlineData("--json:true", true)]
+    [InlineData("--json false", false)]
+    public async Task OperationalFailureHonorsParsedJsonBoolean(
+        string option,
+        bool expectedJson)
+    {
+        string[] args = option.Contains(' ', StringComparison.Ordinal)
+            ? ["status", .. option.Split(' ')]
+            : ["status", option];
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        string logPath = Path.Combine(_testDirectory, "logs", $"{Guid.NewGuid():N}.log");
+
+        int exitCode = await Program.RunAsync(args, CreateStartup(logPath, output, error));
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(expectedJson, !string.IsNullOrWhiteSpace(output.ToString()));
+        Assert.Equal(!expectedJson, !string.IsNullOrWhiteSpace(error.ToString()));
+        if (expectedJson)
+        {
+            using System.Text.Json.JsonDocument document =
+                System.Text.Json.JsonDocument.Parse(output.ToString());
+            Assert.Equal("status", document.RootElement.GetProperty("command").GetString());
+        }
+    }
+
+    [Theory]
+    [InlineData("--json=true", true)]
+    [InlineData("--json:true", true)]
+    [InlineData("--json false", false)]
+    public async Task PackageDiscoveryFailureHonorsJsonBoolean(
+        string option,
+        bool expectedJson)
+    {
+        string runtimeDirectory = Path.Combine(_testDirectory, "runtime");
+        Directory.CreateDirectory(runtimeDirectory);
+        string architecture = System.Runtime.InteropServices.RuntimeInformation
+            .ProcessArchitecture switch
+        {
+            System.Runtime.InteropServices.Architecture.X64 => "x64",
+            System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+            System.Runtime.InteropServices.Architecture.X86 => "x86",
+            System.Runtime.InteropServices.Architecture.Arm => "arm",
+            var value => value.ToString()
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(runtimeDirectory, $"node-v24.0.0-win-{architecture}.zip"),
+            string.Empty);
+        await File.WriteAllTextAsync(
+            Path.Combine(runtimeDirectory, $"node-v24.1.0-win-{architecture}.zip"),
+            string.Empty);
+        string[] args = option.Contains(' ', StringComparison.Ordinal)
+            ? ["status", .. option.Split(' ')]
+            : ["status", option];
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        string logPath = Path.Combine(_testDirectory, "logs", $"{Guid.NewGuid():N}.log");
+
+        int exitCode = await Program.RunAsync(args, CreateStartup(logPath, output, error));
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(expectedJson, !string.IsNullOrWhiteSpace(output.ToString()));
+        Assert.Equal(!expectedJson, !string.IsNullOrWhiteSpace(error.ToString()));
+        if (expectedJson)
+        {
+            using System.Text.Json.JsonDocument document =
+                System.Text.Json.JsonDocument.Parse(output.ToString());
+            Assert.Equal("status", document.RootElement.GetProperty("command").GetString());
+        }
+    }
+
     // Losing the log must not take the command down with it: the host warns
     // once and keeps running.
     [Fact]
@@ -118,9 +246,13 @@ public sealed class ProgramStartupTests : IDisposable
             "Unable to create diagnostics",
             error.ToString(),
             StringComparison.Ordinal);
-        Assert.Equal(
-            typeof(Program).Assembly.GetName().Version?.ToString(),
-            output.ToString().Trim());
+
+        // The point of the test is that the command still produced its result
+        // after diagnostics failed, not what the version happens to be.
+        Assert.Contains(
+            ClawCtlBuildMetadata.PackageVersion,
+            output.ToString(),
+            StringComparison.Ordinal);
     }
 
     // Startup routes the agent alias without letting the clawctl parser see

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using OpenClaw.Launcher.Gateway;
 using OpenClaw.Launcher.Session;
 using LauncherProgram = OpenClaw.Launcher.Program;
@@ -43,7 +44,11 @@ internal static class SmokeProgram
             ("response-file token is not expanded", ResponseFileTokenIsNotExpandedAsync),
             ("completion directive suggests commands", CompletionDirectiveSuggestsAsync),
             ("unpackaged setup reports identity failure", SetupReportsReadinessAsync),
+            ("JSON failures survive NativeAOT", JsonFailureIsStructuredAsync),
+            ("version JSON survives NativeAOT", VersionJsonIsStructuredAsync),
             ("Spectre renders clawctl output under NativeAOT", SpectreOutputRenders),
+            ("gateway narration survives NativeAOT", GatewayNarrationRenders),
+            ("Windows logon identity survives NativeAOT", WindowsLogonIdentityWorks),
             ("missing application reports diagnostics", MissingApplicationReportsAsync),
             ("openclaw never parses its arguments", AgentNeverParsesItsArgumentsAsync)
         ];
@@ -62,6 +67,7 @@ internal static class SmokeProgram
                 await runAsync().ConfigureAwait(false);
                 WriteLine($"  ok    {name}");
             }
+
             catch (Exception exception)
             {
                 failures++;
@@ -78,6 +84,16 @@ internal static class SmokeProgram
 
         WriteLine($"{scenarios.Length} NativeAOT scenarios passed.");
         return 0;
+    }
+
+    private static Task WindowsLogonIdentityWorks()
+    {
+        string id = WindowsLogonSession.GetCurrentId();
+        Assert(
+            id.Length == 17 && id[8] == ':' &&
+            id.Where(character => character != ':').All(Uri.IsHexDigit),
+            $"Unexpected Windows logon identity '{id}'.");
+        return Task.CompletedTask;
     }
 
     // The management entrypoint is selected from the native command line. This
@@ -135,23 +151,58 @@ internal static class SmokeProgram
 
     // This driver's assembly version is 9.9.9.9. The library's built-in action
     // reports the entry assembly, so if the custom action were ever dropped
-    // this scenario would print 9.9.9.9 instead of the launcher's version.
+    // this scenario would print 9.9.9.9 instead of the baked build identity.
     private static async Task VersionReportsLauncherAssemblyAsync()
     {
         using Fixture fixture = Fixture.CreateWithoutApplication();
-        string launcherVersion = LauncherVersion();
         string driverVersion = DriverVersion();
 
         int exitCode = await fixture.RunAsync(["--version"]).ConfigureAwait(false);
 
         AssertExitCode(0, exitCode, fixture);
-        string reported = fixture.Output.ToString().Trim();
+        string reported = fixture.Output.ToString();
+        foreach (string expected in new[]
+        {
+            ClawCtlBuildMetadata.PackageVersion,
+            ClawCtlBuildMetadata.PackageCommit,
+            ClawCtlBuildMetadata.PayloadVersion,
+            ClawCtlBuildMetadata.PayloadCommit
+        })
+        {
+            Assert(
+                reported.Contains(expected, StringComparison.Ordinal),
+                $"Expected the version report to contain '{expected}'.");
+        }
+
         Assert(
-            string.Equals(reported, launcherVersion, StringComparison.Ordinal),
-            $"Expected the launcher version '{launcherVersion}' but got '{reported}'.");
-        Assert(
-            !string.Equals(reported, driverVersion, StringComparison.Ordinal),
+            !string.Equals(reported.Trim(), driverVersion, StringComparison.Ordinal),
             $"Reported this driver's version '{driverVersion}' instead of the launcher's.");
+    }
+
+    // The build identity is the one document produced outside the command
+    // result path, and it adds a type to the serializer context. Source
+    // generation has to cover it ahead of time or this returns an empty object.
+    private static async Task VersionJsonIsStructuredAsync()
+    {
+        using Fixture fixture = Fixture.CreateWithoutApplication();
+
+        int exitCode = await fixture.RunAsync(["--version", "--json"]).ConfigureAwait(false);
+
+        AssertExitCode(0, exitCode, fixture);
+        using JsonDocument document = JsonDocument.Parse(fixture.Output.ToString());
+        JsonElement root = document.RootElement;
+        Assert(root.GetProperty("ok").GetBoolean(), "The version document reported failure.");
+        Assert(
+            root.GetProperty("command").GetString() == "version",
+            "The version document did not name the version command.");
+        Assert(
+            root.GetProperty("package").GetProperty("version").GetString() ==
+                ClawCtlBuildMetadata.PackageVersion,
+            "The version document did not carry the baked package version.");
+        Assert(
+            root.GetProperty("payload").GetProperty("commit").GetString() ==
+                ClawCtlBuildMetadata.PayloadCommit,
+            "The version document did not carry the baked payload commit.");
     }
 
     private static async Task VersionWinsOverTrailingAsync()
@@ -162,9 +213,8 @@ internal static class SmokeProgram
 
         AssertExitCode(0, exitCode, fixture);
         Assert(
-            string.Equals(
-                fixture.Output.ToString().Trim(),
-                LauncherVersion(),
+            fixture.Output.ToString().Contains(
+                ClawCtlBuildMetadata.PackageVersion,
                 StringComparison.Ordinal),
             "Expected the launcher version with a trailing argument present.");
     }
@@ -247,6 +297,24 @@ internal static class SmokeProgram
             "The readiness check removed or replaced the fixture entry point.");
     }
 
+    private static async Task JsonFailureIsStructuredAsync()
+    {
+        using Fixture fixture = Fixture.CreateWithoutApplication();
+
+        int exitCode = await fixture.RunAsync(["setup", "--json"]).ConfigureAwait(false);
+
+        AssertExitCode(1, exitCode, fixture);
+        using JsonDocument document = JsonDocument.Parse(fixture.Output.ToString());
+        JsonElement root = document.RootElement;
+        Assert(!root.GetProperty("ok").GetBoolean(), "The JSON failure reported success.");
+        Assert(
+            root.GetProperty("schemaVersion").GetInt32() == 1,
+            "The JSON failure did not report schema version 1.");
+        Assert(
+            root.GetProperty("error").GetProperty("type").GetString() == "cli_error",
+            "The JSON failure did not use the cli_error envelope.");
+    }
+
     // Spectre.Console composes the renderables; this proves the composition,
     // the ANSI writer, and the no-colour writer all survive trimming and
     // ahead-of-time compilation, and that the two stay textually identical.
@@ -285,7 +353,100 @@ internal static class SmokeProgram
         Assert(
             failure.ToString().Contains("no package identity.", StringComparison.Ordinal),
             "The note callout did not render its message.");
+
+        using var hint = new StringWriter();
+        ClawCtlConsole.WriteGatewayHint(
+            hint,
+            useColor: true,
+            useUnicode: true);
+        string visibleHint = StripAnsi(hint.ToString());
+        Assert(
+            visibleHint.Contains("\U0001f980 Hint:", StringComparison.Ordinal) &&
+            visibleHint.Contains(
+                "Run clawctl gateway-service start",
+                StringComparison.Ordinal) &&
+            !visibleHint.Contains(
+                "'clawctl gateway-service start'",
+                StringComparison.Ordinal),
+            "The colored gateway hint lost its branding or command formatting.");
+
+        using var readinessJson = new StringWriter();
+        ClawCtlJson.WriteResult(
+            readinessJson,
+            new GatewayCommandResult(
+                "status",
+                GatewayState.NotStarted,
+                "No gateway has been started.",
+                null,
+                0,
+                Readiness: new AgentConfigReadinessStatus(
+                    AgentConfigReadinessState.StartupEligible)));
+        using JsonDocument readinessDocument =
+            JsonDocument.Parse(readinessJson.ToString());
+        Assert(
+            readinessDocument.RootElement
+                .GetProperty("gateway")
+                .GetProperty("readiness")
+                .GetProperty("state")
+                .GetString() == "startup-eligible",
+            "The readiness JSON projection did not survive NativeAOT.");
         return Task.CompletedTask;
+    }
+
+    // Spectre's live displays and the generic progress plumbing are the parts
+    // most likely to depend on something trimming removes, and narration only
+    // ever runs on a real start, which no unit test performs end to end.
+    private static async Task GatewayNarrationRenders()
+    {
+        using var narrated = new StringWriter();
+        int value = await ClawCtlConsole.NarrateAsync(
+            narrated,
+            useColor: false,
+            narrate: true,
+            GatewayStartProgress.Initial,
+            progress =>
+            {
+                progress.Report(new GatewayStartProgress(
+                    GatewayStartStage.WaitingForListener,
+                    "Waiting for the gateway to start listening."));
+                return Task.FromResult(42);
+            }).ConfigureAwait(false);
+
+        Assert(value == 42, "Narration did not return the operation's result.");
+        Assert(
+            narrated.ToString().Contains("start listening", StringComparison.Ordinal),
+            "Narration did not report its stage.");
+
+        using var silent = new StringWriter();
+        await ClawCtlConsole.NarrateAsync(
+            silent,
+            useColor: false,
+            narrate: false,
+            GatewayStartProgress.Initial,
+            progress =>
+            {
+                progress.Report(new GatewayStartProgress(
+                    GatewayStartStage.Launching,
+                    "Launching the gateway."));
+                return Task.FromResult(0);
+            }).ConfigureAwait(false);
+
+        Assert(
+            silent.ToString().Length == 0,
+            "Narration wrote output when it was turned off.");
+
+        using var result = new StringWriter();
+        ClawCtlConsole.WriteResult(result, new GatewayCommandResult(
+            "start",
+            GatewayState.Running,
+            "The gateway is running on port 18789.",
+            null,
+            0,
+            18789,
+            "http://127.0.0.1:18789/"));
+        Assert(
+            result.ToString().Contains("http://127.0.0.1:18789/", StringComparison.Ordinal),
+            "The gateway result did not report its URL.");
     }
 
     private static string StripAnsi(string value)

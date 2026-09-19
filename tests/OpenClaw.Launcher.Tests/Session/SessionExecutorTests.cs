@@ -221,6 +221,7 @@ public sealed class SessionExecutorTests : IDisposable
             Record(),
             @"C:\Package\session-host\x64\openclaw-session-host.exe",
             @"C:\Package\runtime\node-v24.20.0-win-x64.zip",
+            @"C:\Package\app",
             CancellationToken.None);
 
         Assert.Equal(
@@ -527,6 +528,42 @@ public sealed class SessionExecutorTests : IDisposable
         await Create().ExecuteAsync(Record(), Request(), CancellationToken.None);
 
         Assert.Equal(2, seen.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public async Task ConfigReadinessUsesTheDedicatedHelperModeAndCleansUp()
+    {
+        _backend.ExecuteBehavior = request =>
+        {
+            string requestPath = Directory.GetFiles(
+                Workspace,
+                "config-readiness-*.json")
+                .Single(path => !path.EndsWith(".result.json", StringComparison.Ordinal));
+            SessionConfigReadinessRequest readiness =
+                SessionConfigReadinessProtocol.ReadRequest(
+                    File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionConfigReadinessProtocol.SerializeResult(
+                    new SessionConfigReadinessResult
+                    {
+                        RequestId = readiness.RequestId,
+                        State = SessionConfigReadinessState.StartupEligible,
+                        Reason = SessionConfigReadinessReason.GatewayModeLocal
+                    }));
+            return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
+        };
+
+        SessionConfigReadinessResult result =
+            await Create(createRequestId: () => "readiness1")
+                .CheckConfigReadinessAsync(
+                    Record(),
+                    @"C:\Package\session-host\openclaw-session-host.exe",
+                    CancellationToken.None);
+
+        Assert.Equal(SessionConfigReadinessState.StartupEligible, result.State);
+        Assert.Contains("--check-config", _backend.ExecutedCommandLines.Single(), StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFiles(Workspace));
     }
 
     [Fact]

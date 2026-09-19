@@ -15,6 +15,19 @@ and uses a separate `OpenClaw.Gateway` package identity. Both packages use the
 OpenClaw Foundation publisher metadata established for OpenClaw's Windows
 packages.
 
+## Contributor guides
+
+- [Agent instructions](AGENTS.md) define repository-wide working, ownership,
+  validation, and safety rules and route scoped source, script, and test work.
+- [Architecture](docs/architecture.md) explains the host, isolated session,
+  MXC, agent runtime, and gateway boundaries.
+- [Troubleshooting](docs/troubleshooting.md) maps observable failures to checks
+  and recovery steps.
+- [Local development](docs/local-development.md) covers loose registration,
+  local MSIX composition, test signing, and the NativeAOT validation lanes.
+- [Official release process](docs/release-process.md) covers the reviewed
+  policy change, signing workflow, upgrade evidence, and publication checks.
+
 ## Requirements
 
 - Windows 11 on a build that supports isolated agent sessions, on x64 or ARM64.
@@ -73,6 +86,17 @@ reserve, reject, or rewrite upstream command arguments.
 OpenClaw inherits the terminal's working directory; the launcher does not make
 the read-only application directory the workspace.
 
+After each successful interactive `openclaw` invocation, the launcher performs
+a file-only readiness check inside the isolated session. If the default
+`.openclaw\openclaw.json` has `gateway.mode` set to `local` but the managed
+gateway has never started or has stopped, it suggests
+`clawctl gateway-service start` on standard error. It does not suggest a second
+start when gateway status is starting, unhealthy, or unknown. The check stops
+for the current Windows logon after that start command is invoked or a running
+gateway is observed; a new Windows logon enables it again. On an interactive
+terminal the hint uses the crab identity and the same warning/accent palette as
+`clawctl`; redirected and explicitly color-disabled output remains plain.
+
 ### `clawctl`
 
 `clawctl` owns setup and the isolated-session operations:
@@ -81,33 +105,112 @@ the read-only application directory the workspace.
 |---|---|
 | `clawctl setup` | Confirm packaged `app\openclaw.mjs` exists, provision or reuse the owned isolated session, and install the bundled Node.js runtime in the agent profile. It also configures gateway sign-in recovery without starting a gateway. On a machine that cannot host a session it fails with the Windows requirement described under [Requirements](#requirements). |
 | `clawctl setup --fresh [--force]` | Remove this installation's owned session and package-local state, then run setup again. Without `--force`, incomplete external cleanup stops before local state is erased. `--force` is valid only with `--fresh`; it preserves an explicit warning when cleanup of owned external resources cannot be confirmed, but still stops if bounded local deletion fails. |
-| `clawctl status` | Report the recorded isolated session, installed Node.js runtime, gateway, and sign-in recovery state without provisioning or replacing the session. It asks the backend to start the recorded provision as its status probe, so it is not a passive diagnostic. Use `clawctl gateway-service status` to inspect the gateway alone. |
+| `clawctl status` | Report the recorded isolated session, installed Node.js runtime, gateway, sign-in recovery, and file-only config readiness when the gateway is not running. It asks the backend to start the recorded provision as its status probe, so it is not a passive diagnostic, but it does not provision a replacement or start the gateway. Use `clawctl gateway-service status` to inspect the gateway alone. |
 | `clawctl teardown --force` | Confirm deletion, then stop and deprovision the owned session and remove its data and setup state. The MSIX remains installed. |
 | `clawctl pwsh` | Open an interactive PowerShell session inside the agent session. |
 | `clawctl collect-logs [--output <path>]` | Create a redacted host-and-agent diagnostics ZIP. |
-| `clawctl gateway-service start` | Start the OpenClaw gateway in the isolated session. Requires setup. |
-| `clawctl gateway-service status` | Inspect the gateway without starting it. |
+| `clawctl gateway-service start` | Start the OpenClaw gateway in the isolated session and wait for it to listen. Requires setup. |
+| `clawctl gateway-service status` | Inspect the gateway without starting it. When the gateway is not running, it may start/probe only the already-recorded isolated session to report file-only config readiness; it never provisions a replacement or starts the gateway. |
 | `clawctl gateway-service stop` | Stop the gateway while retaining the session and its data. |
 | `clawctl --version` | Print the packaged launcher version. |
 
 Bare `clawctl`, `clawctl -h`, and `clawctl --help` print help without changing
-state. `clawctl setup --help` prints help for that command alone. Help, usage,
-and completion come from
-[System.CommandLine](https://learn.microsoft.com/en-us/dotnet/standard/commandline/).
+state. `clawctl setup --help` prints help for that command alone. Parsing,
+usage errors, and completion come from
+[System.CommandLine](https://learn.microsoft.com/en-us/dotnet/standard/commandline/),
+while help is rendered by `clawctl` itself from the live command tree, so a
+command added to the parser is documented without a separate help edit.
 Invalid management input is rejected with exit code `1` and a parse diagnostic
 on standard error; no readiness check runs.
+
+All non-interactive commands accept `--json` and emit a versioned JSON document
+on standard output. Human diagnostics remain on standard error, and command
+exit codes do not change. `clawctl pwsh --json` is rejected because the command
+hands the terminal to an interactive shell.
+
+When the gateway is not confirmed running, status JSON includes an optional
+`gateway.readiness` object with `state`, stable `reason`, and failure `detail`
+where applicable. The readiness states are `absent`, `not-ready`,
+`startup-eligible`, `unavailable`, and `unknown`. A running gateway omits this
+object and incurs no config-readiness probe.
 
 Interactive terminals use color for headings and status marks. `--no-color`,
 the `NO_COLOR` environment variable, redirected output, and CI disable color;
 `FORCE_COLOR` enables it for redirected output or CI unless color was
-explicitly disabled.
+explicitly disabled. JSON output never contains terminal escape sequences.
+
+### Starting the gateway
+
+`clawctl gateway-service start` waits for the gateway to bind rather than
+returning as soon as the process exists, because a process without a listener
+is not a usable gateway. It reports each stage as it happens — a spinner on an
+interactive terminal, one line per stage anywhere else — and narrates nothing
+at all under `--json`, so standard output carries exactly one document.
+
+The wait has a fixed budget. A gateway still coming up when the budget is spent
+is reported as starting rather than failed, and `clawctl gateway-service status`
+will show it once it binds.
+
+`clawctl` reports the gateway port only when it can identify that listener
+unambiguously:
+
+```text
+clawctl gateway-service start
+
+  Gateway:    ✓ listening
+  Port:       18789
+
+  Token:      openclaw gateway auth-token --show
+```
+
+OpenClaw owns the endpoint configuration, including TLS and a custom Control UI
+base path. The Windows package therefore does not construct an HTTP URL that
+might contradict that configuration. It reports no port when multiple
+unclassified listeners remain. JSON follows the same rule: `gateway.port` is
+present only when identified, and no URL is promised.
+Reaching the Control UI needs the shared gateway token, which
+`openclaw gateway auth-token --show` reveals. `--json` carries the identified
+port but not that command: a script should run it rather than parse a
+suggestion.
 
 Help and version requests take precedence over the rest of the command line.
-`clawctl --version bogus` prints the launcher version and exits `0` rather than
+`clawctl --version bogus` reports the build identity and exits `0` rather than
 reporting `bogus`, because the version request is satisfied before the
-remaining arguments are validated. The version printed is always the packaged
-launcher's assembly version, including when the launcher is hosted by another
-process.
+remaining arguments are validated.
+
+`clawctl --version` reports the package version and packaging-repository
+commit alongside the bundled OpenClaw payload version and its commit:
+
+```text
+clawctl 0.0.0.1
+
+  Package:   0.0.0.1 (bfcb5ba73e7ea3e88ceed8c326e58e5baadc3191)
+  Payload:   2026.8.2 (0965053fe6b9341776df147a6934b7485c60b5ca)
+```
+
+Each commit is the one that produced the version it follows, and is muted so
+the version stays the value a reader compares.
+
+`clawctl --version --json` reports the same identity as a versioned document,
+so a support or deployment script can collect it without parsing prose:
+
+```json
+{
+  "ok": true,
+  "schemaVersion": 1,
+  "command": "version",
+  "package": { "version": "0.0.0.1", "commit": "bfcb5ba…" },
+  "payload": { "version": "2026.8.2", "commit": "0965053…" }
+}
+```
+
+Those four values are compiled into the binary as constants by the build that
+produces the package, so the report cannot drift from the payload it shipped
+with and costs no file or process access at startup. `Build-MSIX.ps1` supplies
+the versions and commits it also records in `msix-metadata.json`; an ordinary
+build falls back to the pin recorded in `release-policy.json`, and reports
+`unknown` for a value no build supplied. The report never comes from the entry
+assembly, so it stays correct when the launcher is hosted by another process.
 
 Response-file expansion is disabled. A leading `@` has no meaning to `clawctl`
 and is reported as an unrecognized argument rather than read from disk.
@@ -128,6 +231,30 @@ processes, including different Windows sessions. Setup validates existing
 runtimes before reuse, replaces invalid runtimes, and validates extraction
 before publishing it. It does not prepare the invoking user's host runtime,
 because nothing runs on the host.
+
+Setup also mirrors the application's native dependency packages into the
+agent's own LocalState, under
+`%LOCALAPPDATA%\OpenClawGatewayMSIX\agent-native\<content-id>`. The
+isolated-session identity may read packaged files but may not map them as
+executable images, so loading a `.node` addon directly from the package fails
+with `ERR_DLOPEN_FAILED` even though the same bytes load from a writable
+location. Only the packages that carry a `.node`, `.dll`, or `.exe` artifact
+are mirrored; the rest of the application, which is nearly all of it, keeps
+executing from the immutable package.
+
+That set is discovered by scanning `app\node_modules`, never from a hard-coded
+list, so an upstream revision that introduces a new native dependency is staged
+automatically. Whole owning package directories are copied rather than
+individual binaries, because a package locates its sibling libraries and helper
+executables relative to its own directory. A packaged preload then redirects
+both CommonJS and ESM resolution to the staged copies, delivered through
+`NODE_OPTIONS` so that the Node.js workers OpenClaw starts inherit it. The
+launcher names that preload rather than composing the variable, and the guest
+appends it to the agent account's own `NODE_OPTIONS`, so an option the agent
+set survives and the invoking host's value never reaches it. Staging is
+idempotent, keyed by package content, and reclaims the superseded copy after an
+upgrade once nothing is still running from it; a launch holds its root for its
+whole lifetime, and a root that is still held is left whole for a later setup.
 
 Run setup before using `openclaw`, `clawctl pwsh`, or gateway-service start.
 There is no session-free mode: `openclaw` runs inside the session recorded by
@@ -378,22 +505,27 @@ development default or another explicitly selected ref.
 Official releases derive their GitHub tag and four-part numeric MSIX identity
 from `gatewayTag` and `msixRevision` in `release-policy.json`. The GitHub tag is
 `<gateway-tag>-msix.<revision>`. The MSIX identity is
-`year.month.patch.(gateway-release-sequence * 1000 + msix-revision)`.
+`year.month.VVPN.0`: `VV` is the two-digit monthly Gateway release sequence,
+`P` is the Gateway correction digit, and `N` is the MSIX rebuild digit. The
+digits are packed numerically into the third component, so leading zeroes are
+not written.
 
 | Gateway tag | MSIX revision | GitHub release tag | MSIX version |
 |---|---:|---|---|
-| `v2026.7.1` | `0` | `v2026.7.1-msix.0` | `2026.7.1.1000` |
-| `v2026.7.1-2` | `0` | `v2026.7.1-2-msix.0` | `2026.7.1.2000` |
-| `v2026.7.1-2` | `1` | `v2026.7.1-2-msix.1` | `2026.7.1.2001` |
-| `v2026.7.2` | `0` | `v2026.7.2-msix.0` | `2026.7.2.1000` |
+| `v2026.7.1` | `0` | `v2026.7.1-msix.0` | `2026.7.100.0` |
+| `v2026.7.1` | `1` | `v2026.7.1-msix.1` | `2026.7.101.0` |
+| `v2026.7.1-2` | `0` | `v2026.7.1-2-msix.0` | `2026.7.120.0` |
+| `v2026.7.2` | `0` | `v2026.7.2-msix.0` | `2026.7.200.0` |
+| `v2026.7.12` | `0` | `v2026.7.12-msix.0` | `2026.7.1200.0` |
 
-The unsuffixed Gateway tag is release sequence `1`; correction suffixes `-2`
-through `-64` use their numeric suffix as the sequence. A `-1` suffix is
-rejected because it would collide with the unsuffixed tag. Set `msixRevision`
-from `0` through `999`, starting at `0` for each Gateway tag and incrementing it
-only when that exact Gateway tag is repackaged. Each Gateway release therefore
-owns a deterministic 1,000-number block, and an MSIX-only rebuild cannot shift
-the version assigned to a later Gateway correction or patch.
+Gateway release sequences must be `1` through `99`. The unsuffixed Gateway tag
+uses correction digit `0`; correction suffixes `-2` through `-9` use their
+numeric suffix. A `-1` suffix remains rejected to match the Gateway release-tag
+contract. Set `msixRevision` from `0` through `9`, starting at `0` for each
+Gateway tag and incrementing it only when that exact Gateway tag is repackaged.
+Decimal place value guarantees Gateway release > Gateway correction > MSIX
+rebuild while keeping every component at four digits or fewer and reserving the
+fourth component as `0` for Microsoft Store submission.
 
 To prepare an official release, update these policy inputs together in a
 reviewed pull request:
@@ -417,14 +549,15 @@ release notes. Each release contains a signed, multi-architecture
 deployment. The duplicate GitHub Actions artifacts remain short-lived transport
 and diagnostic copies.
 
-Microsoft Store submissions reserve the fourth version component as zero, so
-Store publication will need its own version policy when it is introduced.
+The same identity can be used for direct distribution and Microsoft Store
+submission; the fourth component is always `0`.
 
 The signed `v0.0.0.0` and `v0.0.0.1` proof releases are not production version
-identities, but they are retained as transition baselines. Pull requests that
-change release versioning download the hash-pinned standalone x64 and
-recommended `.msixbundle` assets, install each one on a clean GitHub-hosted
-Windows runner, upgrade it in place through the same delivery format, and
+identities, but they are retained as transition baselines. The latest production
+release is also retained as a migration baseline. Pull requests that change
+release versioning download the hash-pinned standalone x64 and recommended
+`.msixbundle` assets, install each one on a clean GitHub-hosted Windows runner,
+upgrade it in place through the same delivery format, and
 verify that the package family remains stable and a LocalState marker is
 retained. The gate also proves fresh installation of both the standalone and
 bundle candidates. It refuses to run when an OpenClaw Gateway package is
@@ -478,6 +611,7 @@ is recorded in `release-policy.json`.
 | OpenClaw application files | Read-only MSIX package `app` directory |
 | Bundled Node.js archive | Read-only MSIX package `runtime` directory |
 | Extracted Node.js runtime | `%LOCALAPPDATA%\Packages\<package-family>\LocalState\OpenClaw\NodeJS\node-v<version>-win-<architecture>` |
+| Staged native dependency packages | `%LOCALAPPDATA%\OpenClawGatewayMSIX\agent-native\<content-id>` (agent account) |
 | OpenClaw configuration and user state | `%USERPROFILE%\.openclaw` |
 | Launcher diagnostics | `%LOCALAPPDATA%\Packages\<package-family>\LocalState\OpenClawGatewayMSIX\Logs\openclaw.log` |
 
@@ -503,6 +637,13 @@ the trust boundary for the application and archive. `clawctl setup` extracts
 the archive into versioned package LocalState; `openclaw` launches the packaged
 `app\openclaw.mjs` directly with that extracted executable. Neither command
 hashes or walks the expanded application inventory.
+
+Native dependency staging does not move that boundary. The copies live in the
+agent's own profile, which already holds the extracted Node.js runtime and is
+written and read by the same identity that executes it; nothing is staged into
+the guest-writable shared workspace. Application code continues to execute from
+the immutable package, and redirection is gated on a staged file existing, so a
+package that was not staged resolves exactly as before.
 
 The longer-term design is to run the Gateway payload in a dedicated isolated
 agent session rather than the interactive session where the human user is

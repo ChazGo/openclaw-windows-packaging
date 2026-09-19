@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.Json;
 using System.Reflection;
 
 namespace OpenClaw.Launcher.Tests;
@@ -29,6 +30,22 @@ public sealed class ClawCtlCommandLineTests
         string.Join(
             ' ',
             text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    [Theory]
+    [InlineData(1, "status", "--no-color=invalid")]
+    [InlineData(0, "status", "--help", "--no-color=invalid")]
+    public async Task MalformedNoColorStillRendersOrdinaryHelp(
+        int expectedExitCode,
+        params string[] args)
+    {
+        (int exitCode, string output, string error) =
+            await RunAsync(args).ConfigureAwait(true);
+
+        Assert.Equal(expectedExitCode, exitCode);
+        Assert.Contains("Usage:", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("This shouldn't happen", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b[", output, StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData()]
@@ -69,7 +86,7 @@ public sealed class ClawCtlCommandLineTests
             CollectLogs = (_, _) => Task.FromResult(0),
             Teardown = (_, _) => Task.FromResult(0),
             PowerShell = _ => Task.FromResult(0),
-            GatewayStart = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
             GatewayStop = _ => Task.FromResult(0)
         });
@@ -97,7 +114,7 @@ public sealed class ClawCtlCommandLineTests
             CollectLogs = (_, _) => Task.FromResult(0),
             Teardown = (_, _) => Task.FromResult(0),
             PowerShell = _ => Task.FromResult(0),
-            GatewayStart = _ =>
+            GatewayStart = (_, _) =>
             {
                 starts++;
                 return Task.FromResult(0);
@@ -110,6 +127,79 @@ public sealed class ClawCtlCommandLineTests
 
         Assert.Equal(0, exitCode);
         Assert.Equal(1, starts);
+    }
+
+    [Theory]
+    [InlineData("gateway-service start", false)]
+    [InlineData("gateway-service start --recovery", true)]
+    public async Task GatewayServiceStartReportsRecoveryProvenance(
+        string commandLine,
+        bool expectedRecovery)
+    {
+        bool? recovery = null;
+        RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
+        {
+            Setup = (_, _) => Task.FromResult(0),
+            Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
+            Teardown = (_, _) => Task.FromResult(0),
+            PowerShell = _ => Task.FromResult(0),
+            GatewayStart = (value, _) =>
+            {
+                recovery = value;
+                return Task.FromResult(0);
+            },
+            GatewayStatus = _ => Task.FromResult(0),
+            GatewayStop = _ => Task.FromResult(0)
+        });
+
+        int exitCode = await root.Parse(commandLine).InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(expectedRecovery, recovery);
+    }
+
+    [Theory]
+    [InlineData("setup --json")]
+    [InlineData("--json status")]
+    [InlineData("status --json")]
+    [InlineData("collect-logs --json")]
+    [InlineData("teardown --json")]
+    [InlineData("gateway-service start --json")]
+    [InlineData("gateway-service status --json")]
+    [InlineData("gateway-service stop --json")]
+    public async Task JsonIsAvailableToEveryNonInteractiveCommand(string commandLine)
+    {
+        var outputOptions = new ClawCtlOutputOptions();
+        RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
+        {
+            Setup = (_, _) => Task.FromResult(0),
+            Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
+            Teardown = (_, _) => Task.FromResult(0),
+            PowerShell = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
+            GatewayStatus = _ => Task.FromResult(0),
+            GatewayStop = _ => Task.FromResult(0)
+        }, outputOptions);
+
+        int exitCode = await root.Parse(commandLine).InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.True(outputOptions.Json);
+    }
+
+    [Fact]
+    public async Task JsonIsRejectedForInteractivePowerShell()
+    {
+        (int exitCode, _, string error) =
+            await RunAsync("pwsh", "--json").ConfigureAwait(true);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(
+            "'--json' is not supported for 'pwsh'",
+            error,
+            StringComparison.Ordinal);
     }
 
     [Theory]
@@ -132,7 +222,7 @@ public sealed class ClawCtlCommandLineTests
             CollectLogs = (_, _) => Task.FromResult(0),
             Teardown = (_, _) => Task.FromResult(0),
             PowerShell = _ => Task.FromResult(0),
-            GatewayStart = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
             GatewayStop = _ => Task.FromResult(0)
         }, outputOptions);
@@ -176,7 +266,7 @@ public sealed class ClawCtlCommandLineTests
             CollectLogs = (_, _) => Task.FromResult(0),
             Teardown = (_, _) => Task.FromResult(0),
             PowerShell = _ => Task.FromResult(0),
-            GatewayStart = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
             GatewayStop = _ => Task.FromResult(0)
         });
@@ -202,7 +292,7 @@ public sealed class ClawCtlCommandLineTests
             CollectLogs = (_, _) => Task.FromResult(0),
             Teardown = (_, _) => Task.FromResult(0),
             PowerShell = _ => Task.FromResult(0),
-            GatewayStart = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
             GatewayStop = _ => Task.FromResult(0)
         });
@@ -225,22 +315,134 @@ public sealed class ClawCtlCommandLineTests
     }
 
     // The built-in version action reports the entry assembly, which under a test
-    // host or scenario runner is not the launcher. Assert the launcher's own
-    // version so that substitution is caught.
+    // host or scenario runner is not the launcher. Assert the build identity
+    // compiled into the launcher so that substitution is caught.
     [Fact]
-    public async Task VersionReportsTheLauncherAssemblyVersion()
+    public async Task VersionReportsTheBakedBuildIdentity()
     {
-        string expected = typeof(Program).Assembly.GetName().Version?.ToString()
-            ?? "unknown";
-
         (int exitCode, string output, string error) = await RunAsync("--version").ConfigureAwait(true);
+        string reported = Normalize(output);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(error);
-        Assert.Equal(expected, output.Trim());
-        Assert.NotEqual(
-            Assembly.GetEntryAssembly()?.GetName().Version?.ToString(),
-            output.Trim());
+        Assert.Contains(ClawCtlBuildMetadata.PackageVersion, reported, StringComparison.Ordinal);
+        Assert.Contains(ClawCtlBuildMetadata.PackageCommit, reported, StringComparison.Ordinal);
+        Assert.Contains(ClawCtlBuildMetadata.PayloadVersion, reported, StringComparison.Ordinal);
+        Assert.Contains(ClawCtlBuildMetadata.PayloadCommit, reported, StringComparison.Ordinal);
+
+        // The defect this guards: falling back to the library's action, which
+        // reports whichever assembly started the process.
+        string? entryVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString();
+        if (entryVersion is not null)
+        {
+            Assert.NotEqual(entryVersion, reported);
+        }
+    }
+
+    // --version is satisfied by the version option before command dispatch, so
+    // it is the one place a JSON document is produced without a command result.
+    // The documented contract is that every non-interactive command supports
+    // --json, and silently ignoring it would break a caller that piped it.
+    [Fact]
+    public async Task VersionJsonReportsTheBuildIdentity()
+    {
+        (int exitCode, string output, string error) =
+            await RunAsync("--version", "--json").ConfigureAwait(true);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(error);
+        Assert.DoesNotContain("\u001b", output, StringComparison.Ordinal);
+
+        using JsonDocument document = JsonDocument.Parse(output);
+        JsonElement root = document.RootElement;
+        Assert.True(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("version", root.GetProperty("command").GetString());
+
+        JsonElement package = root.GetProperty("package");
+        Assert.Equal(
+            ClawCtlBuildMetadata.PackageVersion,
+            package.GetProperty("version").GetString());
+        Assert.Equal(
+            ClawCtlBuildMetadata.PackageCommit,
+            package.GetProperty("commit").GetString());
+
+        JsonElement payload = root.GetProperty("payload");
+        Assert.Equal(
+            ClawCtlBuildMetadata.PayloadVersion,
+            payload.GetProperty("version").GetString());
+        Assert.Equal(
+            ClawCtlBuildMetadata.PayloadCommit,
+            payload.GetProperty("commit").GetString());
+    }
+
+    [Theory]
+    [InlineData("--json=invalid")]
+    [InlineData("--no-color=invalid")]
+    public async Task VersionPrecedenceSurvivesMalformedBooleanOptions(string option)
+    {
+        (int exitCode, string output, string error) =
+            await RunAsync("--version", option).ConfigureAwait(true);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(error);
+        Assert.Contains(ClawCtlBuildMetadata.PackageVersion, output, StringComparison.Ordinal);
+        Assert.DoesNotContain("This shouldn't happen", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VersionJsonIsAcceptedBeforeTheVersionOption()
+    {
+        (int exitCode, string output, _) =
+            await RunAsync("--json", "--version").ConfigureAwait(true);
+
+        Assert.Equal(0, exitCode);
+        using JsonDocument document = JsonDocument.Parse(output);
+        Assert.Equal("version", document.RootElement.GetProperty("command").GetString());
+    }
+
+    [Fact]
+    public async Task VersionPairsEachCommitWithItsVersion()
+    {
+        (_, string output, _) = await RunAsync("--version").ConfigureAwait(true);
+        string reported = Normalize(output);
+
+        Assert.Contains("Package:", reported, StringComparison.Ordinal);
+        Assert.Contains("Payload:", reported, StringComparison.Ordinal);
+
+        // Each commit belongs to the version it sits behind, so assert the
+        // pairing rather than the mere presence of four strings.
+        Assert.Contains(
+            $"Package: {ClawCtlBuildMetadata.PackageVersion} ({ClawCtlBuildMetadata.PackageCommit})",
+            reported,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"Payload: {ClawCtlBuildMetadata.PayloadVersion} ({ClawCtlBuildMetadata.PayloadCommit})",
+            reported,
+            StringComparison.Ordinal);
+    }
+
+    // The commit is de-emphasised relative to the version it qualifies, so the
+    // two must not render in the same style.
+    [Fact]
+    public void VersionStylesTheCommitApartFromTheVersion()
+    {
+        using var colored = new StringWriter();
+        ClawCtlConsole.WriteVersion(colored, useColor: true);
+        string text = colored.ToString();
+
+        int versionIndex = text.IndexOf(
+            ClawCtlBuildMetadata.PackageVersion,
+            StringComparison.Ordinal);
+        int commitIndex = text.IndexOf(
+            ClawCtlBuildMetadata.PackageCommit,
+            StringComparison.Ordinal);
+
+        Assert.True(versionIndex >= 0 && commitIndex > versionIndex);
+        Assert.Contains(
+            "\u001b[",
+            text[versionIndex..commitIndex],
+            StringComparison.Ordinal);
     }
 
     // The old parser rejected `--version` combined with anything else. The
@@ -255,9 +457,11 @@ public sealed class ClawCtlCommandLineTests
             await RunAsync("--version", "bogus").ConfigureAwait(true);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(
-            typeof(Program).Assembly.GetName().Version?.ToString(),
-            output.Trim());
+        Assert.Contains(
+            ClawCtlBuildMetadata.PackageVersion,
+            Normalize(output),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("bogus", output, StringComparison.Ordinal);
     }
 
     [Theory]

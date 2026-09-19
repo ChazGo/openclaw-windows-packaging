@@ -4,6 +4,7 @@ using OpenClaw.Launcher.Gateway;
 using OpenClaw.Launcher.Session;
 using OpenClaw.Launcher.Tests.Session;
 using OpenClaw.SessionProtocol;
+using System.Text.Json;
 
 namespace OpenClaw.Launcher.Tests;
 
@@ -47,6 +48,26 @@ public sealed class ProgramTests : IDisposable
                 }));
             return Task.FromResult(0);
         };
+        _lastSessionBackend.ExecuteBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "config-readiness-*.json").Single();
+            SessionConfigReadinessRequest request =
+                SessionConfigReadinessProtocol.ReadRequest(
+                    File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionConfigReadinessProtocol.SerializeResult(
+                    new SessionConfigReadinessResult
+                    {
+                        RequestId = request.RequestId,
+                        State = SessionConfigReadinessState.StartupEligible,
+                        Reason = SessionConfigReadinessReason.GatewayModeLocal
+                    }));
+            return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
+        };
+        var error = new StringWriter();
 
         int exitCode = await Program.RunAgentAsync(
             new HostOptions(
@@ -57,10 +78,296 @@ public sealed class ProgramTests : IDisposable
             _ => runtime,
             probeReadiness: SupportedHost,
             getPackageFamilyName: () => runtime.Paths.PackageFamilyName,
-            readEnvironmentVariable: _ => null);
+            readEnvironmentVariable: _ => null,
+            isInteractive: () => true,
+            error: error,
+            getLogonSessionId: () => "logon-a");
 
         Assert.Equal(arguments, forwarded);
         Assert.Equal(7, exitCode);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task SuccessfulInteractiveAgentHintsWhenEligibleGatewayWasNeverStarted()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        HostOptions setupOptions = CreateSetupOptions(applicationDirectory);
+        SessionRuntime runtime = CreateSessionRuntime();
+        int setupExitCode = await Program.RunControlAsync(
+            setupOptions,
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: new FailingFreshLifecycle(runtime) { TeardownSucceeds = true });
+        Assert.Equal(0, setupExitCode);
+
+        _lastSessionBackend!.AttachedBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.SerializeResult(new SessionLaunchResult
+                {
+                    RequestId = request.RequestId,
+                    Launched = true,
+                    ExitCode = 0,
+                }));
+            return Task.FromResult(0);
+        };
+        _lastSessionBackend.ExecuteBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "config-readiness-*.json").Single();
+            SessionConfigReadinessRequest request =
+                SessionConfigReadinessProtocol.ReadRequest(
+                    File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionConfigReadinessProtocol.SerializeResult(
+                    new SessionConfigReadinessResult
+                    {
+                        RequestId = request.RequestId,
+                        State = SessionConfigReadinessState.StartupEligible,
+                        Reason = SessionConfigReadinessReason.GatewayModeLocal
+                    }));
+            return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
+        };
+        var error = new StringWriter();
+
+        int exitCode = await Program.RunAgentAsync(
+            new HostOptions(
+                applicationDirectory,
+                setupOptions.PackagedNodeArchivePath,
+                ["status"]),
+            _ => { },
+            _ => runtime,
+            probeReadiness: SupportedHost,
+            getPackageFamilyName: () => runtime.Paths.PackageFamilyName,
+            readEnvironmentVariable: _ => null,
+            isInteractive: () => true,
+            error: error,
+            getLogonSessionId: () => "logon-a",
+            errorIsProcessConsoleWriter: () => true,
+            errorIsInteractive: () => false,
+            supportsUnicode: () => true);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("\u001b[", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("\U0001f980", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(
+            AgentGatewayGuidance.Hint,
+            System.Text.RegularExpressions.Regex.Replace(
+                error.ToString(),
+                "\u001b\\[[0-9;]*m",
+                string.Empty),
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(17)]
+    public async Task BackendAdvisoryFailurePreservesAgentExitCode(int childExitCode)
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        HostOptions setupOptions = CreateSetupOptions(applicationDirectory);
+        SessionRuntime runtime = CreateSessionRuntime();
+        int setupExitCode = await Program.RunControlAsync(
+            setupOptions,
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: new FailingFreshLifecycle(runtime) { TeardownSucceeds = true });
+        Assert.Equal(0, setupExitCode);
+
+        FakeMxcSessionClient backend = _lastSessionBackend!;
+        backend.AttachedBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                backend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.SerializeResult(new SessionLaunchResult
+                {
+                    RequestId = request.RequestId,
+                    Launched = true,
+                    ExitCode = childExitCode,
+                }));
+            backend.ExecuteFailure =
+                new MxcException(MxcErrorCode.BackendError, "readiness dispatch failed");
+            return Task.FromResult(0);
+        };
+        var log = new List<string>();
+
+        int exitCode = await Program.RunAgentAsync(
+            new HostOptions(
+                applicationDirectory,
+                setupOptions.PackagedNodeArchivePath,
+                ["status"]),
+            log.Add,
+            _ => runtime,
+            probeReadiness: SupportedHost,
+            getPackageFamilyName: () => runtime.Paths.PackageFamilyName,
+            readEnvironmentVariable: _ => null,
+            isInteractive: () => true,
+            error: TextWriter.Null,
+            getLogonSessionId: () => "logon-advisory");
+
+        Assert.Equal(childExitCode, exitCode);
+        Assert.Contains(
+            log,
+            line => line.Contains(
+                "MxcException: readiness dispatch failed",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ManualGatewayStartAcknowledgesBeforeAStartFailure()
+    {
+        SessionRuntime runtime = await SetUpSessionAsync().ConfigureAwait(true);
+        ((FakeMxcSessionClient)runtime.Backend).ExecuteFailure =
+            new SessionException("gateway start failed");
+
+        await Assert.ThrowsAsync<SessionException>(
+            () => Program.RunControlAsync(
+                CreateSetupOptions(Path.Combine(_testDirectory, "app")),
+                ["gateway-service", "start"],
+                _ => { },
+                TextWriter.Null,
+                TextWriter.Null,
+                installationLifecycle: new FailingFreshLifecycle(runtime),
+                getLogonSessionId: () => "logon-manual"));
+
+        var store = new GatewayGuidanceStateStore(
+            runtime.Paths.GatewayGuidanceStatePath);
+        Assert.True(store.IsAcknowledged("logon-manual"));
+    }
+
+    [Fact]
+    public async Task RetainedRecoveryScriptUpgradesWithoutManualAcknowledgement()
+    {
+        SessionRuntime runtime = await SetUpSessionAsync().ConfigureAwait(true);
+        string activationScriptPath =
+            Path.ChangeExtension(runtime.Paths.GatewayLauncherPath, ".ps1");
+        string legacyScript =
+            GatewayLauncherScript.CreateActivationScript(
+                runtime.Paths.PackageFamilyName!)
+            .Replace(
+                GatewayLauncherScript.ControlArguments,
+                "gateway-service start",
+                StringComparison.Ordinal);
+        await File.WriteAllTextAsync(
+            activationScriptPath,
+            legacyScript,
+            CancellationToken.None);
+        ((FakeMxcSessionClient)runtime.Backend).ExecuteFailure =
+            new SessionException("gateway recovery failed");
+
+        await Assert.ThrowsAsync<SessionException>(
+            () => Program.RunControlAsync(
+                CreateSetupOptions(Path.Combine(_testDirectory, "app")),
+                ["gateway-service", "start"],
+                _ => { },
+                TextWriter.Null,
+                TextWriter.Null,
+                installationLifecycle: new FailingFreshLifecycle(runtime),
+                getLogonSessionId: () => "logon-recovery"));
+
+        var store = new GatewayGuidanceStateStore(
+            runtime.Paths.GatewayGuidanceStatePath);
+        Assert.False(store.IsAcknowledged("logon-recovery"));
+        Assert.Contains(
+            GatewayLauncherScript.ControlArguments,
+            await File.ReadAllTextAsync(
+                activationScriptPath,
+                CancellationToken.None),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The host never composes the agent's <c>NODE_OPTIONS</c>. It names the
+    /// preload, and the guest appends it to whatever the agent already set, so
+    /// settings such as <c>--max-old-space-size</c> survive setup and the
+    /// host's own value never reaches the agent.
+    /// </summary>
+    [Fact]
+    public async Task AgentLaunchNamesTheNativeRedirectWithoutSettingNodeOptions()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        HostOptions setupOptions = CreateSetupOptions(applicationDirectory);
+        SessionRuntime runtime = CreateSessionRuntime();
+        int setupExitCode = await Program.RunControlAsync(
+            setupOptions,
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: new FailingFreshLifecycle(runtime) { TeardownSucceeds = true });
+        Assert.Equal(0, setupExitCode);
+
+        // Stands in for a setup that staged native packages.
+        string nativeRoot = Path.Combine(_testDirectory, "agent-native", "0123456789abcdef");
+        Directory.CreateDirectory(nativeRoot);
+        SetupRecord staged = runtime.SetupState.Read(runtime.ApplicationId).Record!;
+        runtime.SetupState.Write(staged with { AgentNativeRoot = nativeRoot });
+
+        SessionLaunchRequest? launched = null;
+        _lastSessionBackend!.AttachedBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            launched = request;
+
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.SerializeResult(new SessionLaunchResult
+                {
+                    RequestId = request.RequestId,
+                    Launched = true,
+                    ExitCode = 0,
+                }));
+            return Task.FromResult(0);
+        };
+
+        await Program.RunAgentAsync(
+            new HostOptions(
+                applicationDirectory,
+                setupOptions.PackagedNodeArchivePath,
+                ["doctor"]),
+            _ => { },
+            _ => runtime,
+            probeReadiness: SupportedHost,
+            getPackageFamilyName: () => runtime.Paths.PackageFamilyName,
+            readEnvironmentVariable: name =>
+                name == OpenClawRuntimeEnvironment.NodeOptionsVariable
+                    ? "--host-only-flag"
+                    : null).ConfigureAwait(true);
+
+        Assert.NotNull(launched);
+        Assert.Contains(
+            OpenClawRuntimeEnvironment.NativeRedirectFileName,
+            launched.NodeOptionsSuffix,
+            StringComparison.Ordinal);
+        Assert.Equal(nativeRoot, launched.NativeRootPath);
+
+        // The assigned environment must not carry NODE_OPTIONS at all: it
+        // would replace the agent's, and the host's value is not the agent's.
+        Assert.False(
+            launched.Environment!.ContainsKey(
+                OpenClawRuntimeEnvironment.NodeOptionsVariable));
     }
 
     [Fact]
@@ -203,6 +510,33 @@ public sealed class ProgramTests : IDisposable
         Assert.DoesNotContain("ready", output.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task SetupJsonFailureWritesOnlyTheVersionedErrorDocument()
+    {
+        string applicationDirectory = Path.Combine(_testDirectory, "app");
+        Directory.CreateDirectory(applicationDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(applicationDirectory, "openclaw.mjs"),
+            "console.log('fixture');");
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(applicationDirectory, null, []),
+            ["setup", "--json"],
+            _ => { },
+            output,
+            error);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(error.ToString());
+        using JsonDocument document = JsonDocument.Parse(output.ToString());
+        JsonElement root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("setup", root.GetProperty("command").GetString());
+        Assert.Equal("cli_error", root.GetProperty("error").GetProperty("type").GetString());
+    }
 
     [Fact]
     public async Task AgentUsesTheRuntimeInstalledForTheSessionWithoutHostFallback()
@@ -522,6 +856,10 @@ public sealed class ProgramTests : IDisposable
             setupOutput,
             TextWriter.Null,
             installationLifecycle: lifecycle);
+        ConfigureConfigReadiness(
+            (FakeMxcSessionClient)runtime.Backend,
+            SessionConfigReadinessState.StartupEligible,
+            SessionConfigReadinessReason.GatewayModeLocal);
         using var statusOutput = new StringWriter();
 
         int statusExitCode = await Program.RunControlAsync(
@@ -540,10 +878,304 @@ public sealed class ProgramTests : IDisposable
         Assert.Contains("Node.js 24.20.0", status, StringComparison.Ordinal);
         Assert.Contains("Gateway:", status, StringComparison.Ordinal);
         Assert.Contains("not started", status, StringComparison.Ordinal);
+        Assert.Contains("Readiness:", status, StringComparison.Ordinal);
+        Assert.Contains("startup eligible", status, StringComparison.Ordinal);
         Assert.Contains("Recovery:", status, StringComparison.Ordinal);
         Assert.Contains("configured", status, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task StatusJsonReportsStructuredSessionGatewayAndRecovery()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime);
+        using var setupOutput = new StringWriter();
+        int setupExitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup"],
+            _ => { },
+            setupOutput,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+        ConfigureConfigReadiness(
+            (FakeMxcSessionClient)runtime.Backend,
+            SessionConfigReadinessState.StartupEligible,
+            SessionConfigReadinessReason.GatewayModeLocal);
+        using var statusOutput = new StringWriter();
+        using var statusError = new StringWriter();
+
+        int statusExitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["status", "--json"],
+            _ => { },
+            statusOutput,
+            statusError,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(0, setupExitCode);
+        Assert.Equal(0, statusExitCode);
+        Assert.Empty(statusError.ToString());
+        using JsonDocument document = JsonDocument.Parse(statusOutput.ToString());
+        JsonElement root = document.RootElement;
+        Assert.True(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("running", root.GetProperty("session").GetProperty("state").GetString());
+        Assert.Equal("24.20.0", root.GetProperty("session").GetProperty("nodeVersion").GetString());
+        Assert.Equal("not-started", root.GetProperty("gateway").GetProperty("state").GetString());
+        JsonElement readiness =
+            root.GetProperty("gateway").GetProperty("readiness");
+        Assert.Equal("startup-eligible", readiness.GetProperty("state").GetString());
+        Assert.Equal("gateway-mode-local", readiness.GetProperty("reason").GetString());
+        Assert.Equal("configured", root.GetProperty("recovery").GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task GatewayStatusStartsOnlyTheRecordedSessionAndReportsReadiness()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime);
+        int setupExitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        ConfigureConfigReadiness(
+            backend,
+            SessionConfigReadinessState.NotReady,
+            SessionConfigReadinessReason.GatewayModeMissing);
+        backend.Calls.Clear();
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["gateway-service", "status"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(0, setupExitCode);
+        Assert.Equal(0, exitCode);
+        Assert.Contains(
+            backend.Calls,
+            call => call.StartsWith("start:", StringComparison.Ordinal));
+        Assert.Contains(
+            backend.Calls,
+            call => call.StartsWith("execute:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            backend.Calls,
+            call => call.StartsWith("provision", StringComparison.Ordinal));
+        Assert.Contains("Readiness:", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("not ready", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("gateway.mode is missing", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "clawctl gateway-service start",
+            output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GatewayStatusWithoutARecordedSessionReportsUnavailableWithoutProvisioning()
+    {
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime);
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(Path.Combine(_testDirectory, "app")),
+            ["gateway-service", "status"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(backend.Calls);
+        Assert.Contains("Readiness:", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("unavailable", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task StatusJsonRetainsGatewayWhenReadinessProbeFails(
+        bool gatewayOnly,
+        bool malformedResult)
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime);
+        int setupExitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        if (malformedResult)
+        {
+            backend.ExecuteBehavior = _ =>
+            {
+                string requestPath = Directory.GetFiles(
+                    backend.Metadata!.EphemeralWorkspacePath,
+                    "config-readiness-*.json").Single();
+                File.WriteAllText(
+                    SessionLaunchProtocol.ResultPathFor(requestPath),
+                    SessionConfigReadinessProtocol.SerializeResult(
+                        new SessionConfigReadinessResult
+                        {
+                            RequestId = "different-request",
+                            State = SessionConfigReadinessState.StartupEligible,
+                            Reason = SessionConfigReadinessReason.GatewayModeLocal
+                        }));
+                return Task.FromResult(
+                    new MxcExecutionResult(0, string.Empty, string.Empty));
+            };
+        }
+        else
+        {
+            backend.ExecuteFailure =
+                new MxcException(
+                    MxcErrorCode.BackendError,
+                    "readiness backend unavailable");
+        }
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            gatewayOnly
+                ? ["gateway-service", "status", "--json"]
+                : ["status", "--json"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(0, setupExitCode);
+        Assert.Equal(1, exitCode);
+        using JsonDocument document = JsonDocument.Parse(output.ToString());
+        JsonElement root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(
+            "not-started",
+            root.GetProperty("gateway").GetProperty("state").GetString());
+        JsonElement readiness =
+            root.GetProperty("gateway").GetProperty("readiness");
+        Assert.Equal("unknown", readiness.GetProperty("state").GetString());
+        Assert.Contains(
+            malformedResult
+                ? "does not match"
+                : "readiness backend unavailable",
+            readiness.GetProperty("detail").GetString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GatewayStatusReportsUnknownReadinessWhenRecordedSessionIsUnavailable()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime);
+        int setupExitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+        ((FakeMxcSessionClient)runtime.Backend).StartFailure = new MxcException(
+            MxcErrorCode.RuntimeUnavailable,
+            "MXC is unavailable");
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["gateway-service", "status", "--json"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle);
+
+        Assert.Equal(0, setupExitCode);
+        Assert.Equal(1, exitCode);
+        using JsonDocument document = JsonDocument.Parse(output.ToString());
+        JsonElement readiness = document.RootElement
+            .GetProperty("gateway")
+            .GetProperty("readiness");
+        Assert.Equal("unknown", readiness.GetProperty("state").GetString());
+        Assert.Contains(
+            "MXC is unavailable",
+            readiness.GetProperty("detail").GetString(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StatusJsonFailureRetainsStateDetails()
+    {
+        using var output = new StringWriter();
+        var result = new StatusCommandResult(
+            new SessionStatus(
+                SessionAvailability.Stale,
+                null,
+                SessionStateFault.Missing,
+                "The recorded session is missing."),
+            new GatewayStatusReport(
+                GatewayState.Unhealthy,
+                null,
+                "The gateway is unhealthy."),
+            new GatewayPersistenceStatus(
+                GatewayPersistenceState.ActionRequired,
+                GatewayPersistenceLane.TaskScheduler,
+                "Recovery needs attention."),
+            null);
+
+        ClawCtlJson.WriteResult(output, result);
+
+        using JsonDocument document = JsonDocument.Parse(output.ToString());
+        JsonElement root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal("stale", root.GetProperty("session").GetProperty("state").GetString());
+        Assert.Equal("unhealthy", root.GetProperty("gateway").GetProperty("state").GetString());
+        Assert.Equal(
+            "action-required",
+            root.GetProperty("recovery").GetProperty("state").GetString());
+        Assert.Equal("cli_error", root.GetProperty("error").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task TeardownJsonWithoutForceWritesAFailureDocument()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(null, null, []),
+            ["teardown", "--json"],
+            _ => { },
+            output,
+            error,
+            installationLifecycle: new FailingFreshLifecycle(CreateSessionRuntime()));
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(error.ToString());
+        using JsonDocument document = JsonDocument.Parse(output.ToString());
+        JsonElement root = document.RootElement;
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal("teardown", root.GetProperty("command").GetString());
+        Assert.Contains(
+            "--force",
+            root.GetProperty("error").GetProperty("message").GetString(),
+            StringComparison.Ordinal);
+    }
 
     [Fact]
     public async Task FreshSetupCleanerFailurePreventsProvisionAndReady()
@@ -1428,6 +2060,33 @@ public sealed class ProgramTests : IDisposable
         string archivePath = Path.Combine(_testDirectory, "node-v24.20.0-win-x64.zip");
         File.WriteAllText(archivePath, "fixture");
         return new HostOptions(applicationDirectory, archivePath, []);
+    }
+
+    private static void ConfigureConfigReadiness(
+        FakeMxcSessionClient backend,
+        SessionConfigReadinessState state,
+        SessionConfigReadinessReason reason)
+    {
+        backend.ExecuteBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                backend.Metadata!.EphemeralWorkspacePath,
+                "config-readiness-*.json").Single();
+            SessionConfigReadinessRequest request =
+                SessionConfigReadinessProtocol.ReadRequest(
+                    File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionConfigReadinessProtocol.SerializeResult(
+                    new SessionConfigReadinessResult
+                    {
+                        RequestId = request.RequestId,
+                        State = state,
+                        Reason = reason
+                    }));
+            return Task.FromResult(
+                new MxcExecutionResult(0, string.Empty, string.Empty));
+        };
     }
 
     private sealed class FailingFreshLifecycle : IInstallationLifecycle

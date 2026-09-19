@@ -5,6 +5,14 @@ This repository builds the `OpenClaw.Gateway` MSIX package and the
 .NET SDK through `global.json`. Run every command below from the repository
 root in PowerShell 7 (`pwsh`).
 
+The contributor guides cover the workflows and architecture behind the command
+summary below:
+
+- [Architecture](docs/architecture.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Local development](docs/local-development.md)
+- [Official release process](docs/release-process.md)
+
 ## Prerequisites
 
 - PowerShell 7
@@ -95,6 +103,12 @@ a real process.
 Formatting and analyzer severity are defined by the root `.editorconfig`. The
 analyzer properties themselves live in `Directory.Build.props`, and the
 repository uses only the analyzers that ship with the pinned SDK.
+`AnalysisMode=All` enables the full analyzer set, and
+`EnforceCodeStyleInBuild` runs IDE-style rules during command-line builds.
+`GenerateDocumentationFile` is required for build-time `IDE0005`; the
+resulting `CS1591` diagnostic is deliberately suppressed rather than filled
+with low-value XML comments. Rule severity belongs in `.editorconfig`, not in
+individual project files.
 
 Continuous integration never rewrites source. To apply formatting locally,
 review the resulting diff before committing:
@@ -170,17 +184,37 @@ bypassable, and required CI checks remain authoritative.
 ## Repository conventions
 
 - Ordinary builds and tests must leave `IncludePackagingContent` unset.
-  Packaging builds set it to `true` and supply a runtime identifier.
+  Packaging builds set it to `true`, supply a runtime identifier and platform,
+  and isolate MSIX intermediates under `obj\packaging`.
 - Treat launcher arguments as OpenClaw-owned. Do not add host-only switches,
   consume `--`, rewrite arguments, or block upstream commands. The
   System.CommandLine tree covers `clawctl` only; the `openclaw` entrypoint must
   keep forwarding its argument vector without parsing it.
-- Preserve direct execution of `app\openclaw.mjs` from the read-only MSIX
-  package. `clawctl setup` owns idempotent extraction of the bundled Node.js
-  archive into versioned package LocalState; do not copy the OpenClaw
-  application payload or use device-installed Node.js.
+- Preserve execution of the packaged `app\openclaw.mjs` from the read-only MSIX
+  package, but run it inside the isolated session rather than launching it
+  directly. `clawctl setup` owns session provisioning and writes the setup
+  marker that `openclaw` requires. Node.js is installed into the agent
+  account's profile by the session host, not into package LocalState; do not
+  copy the OpenClaw application payload or use device-installed Node.js. The
+  one exception is narrow and deliberate: the isolated-session identity cannot
+  map packaged files as executable images, so `clawctl setup` mirrors the
+  dependency packages that carry native artifacts into agent LocalState and
+  redirects resolution to them. That set is discovered by scanning, never
+  hard-coded, and everything else keeps executing from the package. The agent
+  account owns its own `PATH` and `NODE_OPTIONS`: name the directory or the
+  option in the launch request and let the guest compose them, because
+  host-supplied environment values are assigned over the agent's. Reclaim a
+  staged root only when nothing is running from it; every launch holds its root
+  for its lifetime, and a held root is left whole for a later setup.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, and signing validation.
+- Restore `src\OpenClaw.SessionHost\OpenClaw.SessionHost.csproj` separately
+  with the target runtime and `PublishAot=true` before `Build-MSIX.ps1`
+  publishes it with `--no-restore`; the ordinary solution restore is not
+  sufficient.
+- Do not add a packaging-side Node.js version pin or support range. The
+  selected upstream toolchain owns the version; package composition supplies
+  `NodeRuntimeArchiveFileName`, and the host reads the archive name.
 - Metadata files are part of the release trust chain. Coordinate changes across
   payload creation, MSIX creation, signing validation, workflow artifacts, and
   tests.
@@ -197,9 +231,9 @@ bypassable, and required CI checks remain authoritative.
   LocalState, and prove both candidate delivery formats install fresh. Run the
   harness only on an isolated clean Windows account; it refuses pre-existing
   OpenClaw Gateway registrations and cleans up only its own installation.
-- Use source-generated `System.Text.Json` metadata through `OpenClawJsonContext`.
-  The launcher is NativeAOT and must not introduce reflection-based
-  serialization.
+- Use contract-specific source-generated `JsonSerializerContext` metadata.
+  The launcher and session host are NativeAOT and must not introduce
+  reflection-based serialization.
 - PowerShell scripts set `$ErrorActionPreference = 'Stop'` and must also check
   `$LASTEXITCODE` after invoking native tools.
 - Package versions have four numeric components that each fit in `UInt16`.
@@ -213,10 +247,39 @@ bypassable, and required CI checks remain authoritative.
   exit codes, rendered output. Do not read a source file and assert on string
   markers of the implementation.
 - Tests must never modify real user state. Use the isolated temporary
-  directory fixtures rather than touching a real OpenClaw profile, packaged
-  LocalState, or an installed MSIX.
+  directories created by `TestDirectory` rather than touching a real OpenClaw
+  profile, packaged LocalState, or an installed MSIX.
 - Tests must be deterministic: no sleep-based synchronization, hardcoded ports,
   or inter-test ordering dependencies.
+
+## Documentation
+
+`README.md`, `CONTRIBUTING.md`, the root and scoped `AGENTS.md` files, and
+`docs\*.md` must agree with the source that owns each behavior claim. When
+they disagree, source wins — verify the claim and correct the documents rather
+than picking whichever reads best.
+
+Check documentation references before you push:
+
+```powershell
+.\scripts\Test-DocReferences.ps1
+```
+
+It validates that repository paths named in markdown are actually tracked,
+that relative links and their anchors resolve, and that markdown stays LF. It
+resolves paths through `git ls-files` rather than the filesystem, because a
+stale untracked build directory can make a renamed project path look valid.
+Findings exit nonzero locally. Continuous integration runs the same script with
+`-Advisory`, which annotates the pull request without failing the build, so a
+documentation change is never blocked by it.
+
+Three project skills in `.github\skills\` support this work:
+
+| Skill | Use it for |
+|---|---|
+| `technical-documentation` | Writing, reviewing, or auditing any documentation surface |
+| `docs-refactor` | Rewriting, splitting, or reorganizing a page without losing behavior facts |
+| `deslop` | Behavior-neutral cleanup of a branch diff before code review |
 
 ## Pull requests
 
@@ -233,8 +296,13 @@ run.
 
 Keep the description current when review feedback changes the implementation;
 the body is the durable explanation, not just the comment thread. Keep **Allow
-edits from maintainers** enabled so a maintainer can update the branch. Do not
-edit `CHANGELOG.md`.
+edits from maintainers** enabled so a maintainer can update the branch.
+
+This repository keeps no changelog file. An official release calls
+`softprops/action-gh-release` with `generate_release_notes: true`, so GitHub
+composes the release notes from the titles of the pull requests merged since
+the previous release tag. Your pull request title is the release note, which is
+why the `type: user-facing description` form matters.
 
 ### Stacked pull requests
 

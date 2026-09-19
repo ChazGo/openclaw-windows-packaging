@@ -2,6 +2,53 @@ namespace OpenClaw.Launcher.Tests;
 
 public sealed class OpenClawRuntimeEnvironmentTests
 {
+    /// <summary>
+    /// The redirect travels in <c>NODE_OPTIONS</c> because OpenClaw starts its
+    /// own Node.js workers, which inherit the environment but not this
+    /// process's arguments.
+    /// </summary>
+    [Fact]
+    public void NativeRedirectNamesBothRootsAndLeavesNodeOptionsToTheAgent()
+    {
+        IReadOnlyDictionary<string, string> result =
+            OpenClawRuntimeEnvironment.BuildNativeRedirect(
+                @"C:\Package\app",
+                @"C:\Users\agent\AppData\Local\OpenClawGatewayMSIX\agent-native\abc");
+
+        Assert.Equal(@"C:\Package\app", result["OPENCLAW_NATIVE_APP_ROOT"]);
+        Assert.Equal(
+            @"C:\Users\agent\AppData\Local\OpenClawGatewayMSIX\agent-native\abc",
+            result["OPENCLAW_NATIVE_STAGED_ROOT"]);
+
+        // Assigned over the agent's environment, so a value composed here would
+        // replace whatever the agent already set.
+        Assert.False(result.ContainsKey("NODE_OPTIONS"));
+    }
+
+    [Fact]
+    public void NativeRedirectNodeOptionImportsThePreload()
+    {
+        Assert.Equal(
+            "--import file:///C:/Package/node/native-redirect.mjs",
+            OpenClawRuntimeEnvironment.BuildNativeRedirectNodeOption(
+                @"C:\Package\node\native-redirect.mjs"));
+    }
+
+    /// <summary>
+    /// The package installs under "Program Files", so the option value must
+    /// not contain a raw space that NODE_OPTIONS would split on.
+    /// </summary>
+    [Fact]
+    public void NativeRedirectEncodesSpacesInThePreloadPath()
+    {
+        string options = OpenClawRuntimeEnvironment.BuildNativeRedirectNodeOption(
+            @"C:\Program Files\WindowsApps\OpenClaw\node\native-redirect.mjs");
+
+        Assert.DoesNotContain("Program Files", options, StringComparison.Ordinal);
+        Assert.Contains("Program%20Files", options, StringComparison.Ordinal);
+        Assert.Single(options.Split(' '), static part => part.StartsWith("file:", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void BuildInteractiveAddsOnlyMissingTerminalHints()
     {
