@@ -32,7 +32,7 @@ if ($SigningMode -eq 'official') {
         throw (
             'Official signing cannot use an unapproved or development ref. ' +
             "Set openclaw_ref to $approvedCommit, or select signing_mode " +
-            "'unsigned' or 'test' to qualify the unreleased development runtime."
+            "'unsigned' or 'test' to qualify a different runtime."
         )
     }
 }

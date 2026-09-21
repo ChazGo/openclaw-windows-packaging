@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       openclaw_ref:
-        description: OpenClaw ref (default is unreleased; official signing requires release-policy.json approvedCommit)
+        description: OpenClaw ref (official signing requires release-policy.json approvedCommit)
         required: true
-        default: 44e9347d3342cd8b5e27fec78df40b8dff0dca34
+        default: ec9c1a13db8938e5a3eaa51fca2e981cde2395a9
         type: string
       signing_mode:
         description: Package signing mode
@@ -31,7 +31,7 @@ permissions:
   pull-requests: read
 
 env:
-  OPENCLAW_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.openclaw_ref || '44e9347d3342cd8b5e27fec78df40b8dff0dca34' }}
+  OPENCLAW_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.openclaw_ref || 'ec9c1a13db8938e5a3eaa51fca2e981cde2395a9' }}
   PACKAGING_ROOT: .
 
 jobs:

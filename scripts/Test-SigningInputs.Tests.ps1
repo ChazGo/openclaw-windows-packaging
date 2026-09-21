@@ -8,6 +8,12 @@ $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $policyPath = Join-Path $repositoryRoot 'release-policy.json'
 $policy = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json
 $approvedCommit = [string]$policy.approvedCommit
+$unapprovedCommit = if ($policy.PSObject.Properties.Name -contains 'developmentCommit') {
+    [string]$policy.developmentCommit
+}
+else {
+    ('b' * 40)
+}
 $releaseIdentity = & (
     Join-Path $PSScriptRoot 'Get-MSIXReleaseIdentity.ps1'
 ) `
@@ -461,19 +467,17 @@ try {
         }
 
     Reset-TestArtifacts
-    if ($policy.PSObject.Properties.Name -contains 'developmentCommit') {
-        Assert-Fails `
-            -MessagePattern 'approved immutable OpenClaw commit' `
-            -Action {
-                Invoke-PolicyValidation `
-                    -Root $testRoot `
-                    -RequestedRef ([string]$policy.developmentCommit)
-            }
-        Reset-TestArtifacts -PayloadCommit ([string]$policy.developmentCommit)
-        Assert-Fails `
-            -MessagePattern 'MSIX metadata is not eligible for signing' `
-            -Action { Invoke-PolicyValidation -Root $testRoot }
-    }
+    Assert-Fails `
+        -MessagePattern 'approved immutable OpenClaw commit' `
+        -Action {
+            Invoke-PolicyValidation `
+                -Root $testRoot `
+                -RequestedRef $unapprovedCommit
+        }
+    Reset-TestArtifacts -PayloadCommit $unapprovedCommit
+    Assert-Fails `
+        -MessagePattern 'MSIX metadata is not eligible for signing' `
+        -Action { Invoke-PolicyValidation -Root $testRoot }
 
     Reset-TestArtifacts
     Update-TestMsix -Root $testRoot -Architecture x64 -Mutator {

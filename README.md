@@ -402,14 +402,10 @@ not packaged-launcher isolation or installed upgrade behavior.
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by
 [`openclaw/openclaw#145409`](https://github.com/openclaw/openclaw/pull/145409).
-The workflow defaults to the explicitly unreleased development commit
-`44e9347d3342cd8b5e27fec78df40b8dff0dca34`, which includes that forwarding.
-Its package version is still `2026.9.4`; this does not make it a stable release.
-The official approval remains `v2026.9.4` at
-`3a9d69db306cd7f081e06254cb89c4bcc14a7107`, which lacks theme forwarding.
-Qualifying the development runtime does not qualify officially signed production
-packages: those still need a separate stable runtime approval. Without
-forwarding, the page uses the browser or
+Both workflow defaults and the release policy pin stable `v2026.9.5` at
+`ec9c1a13db8938e5a3eaa51fca2e981cde2395a9`, which includes that forwarding.
+Local test-signed qualification does not establish officially signed release
+readiness. Without forwarding, the page uses the browser or
 operating system light/dark preference with a safe built-in palette.
 
 `scripts\Build-MSIX.ps1` downloads the official Node.js archive matching the
@@ -495,12 +491,12 @@ Test-signing private keys are generated only on the temporary GitHub runner
 and are deleted before artifacts are uploaded. No signing secret or private
 key is stored in the repository.
 
-`release-policy.json` may declare a separate immutable `developmentCommit` for
-both workflow defaults. It is not an official signing authorization.
-An `official` run must explicitly override `openclaw_ref` with `approvedCommit`;
-using the unreleased default fails before source resolution or build, with the
-required input shown in the error. Unsigned and test-signed runs can use the
-development default or another explicitly selected ref.
+Both workflow defaults use `release-policy.json`'s `approvedCommit` unless a
+separate immutable `developmentCommit` is declared. That optional override is
+not an official signing authorization: an `official` run must select
+`approvedCommit`. Any other ref fails before source resolution or build, with
+the required input shown in the error. Unsigned and test-signed runs can use
+another explicitly selected ref.
 
 Official releases derive their GitHub tag and four-part numeric MSIX identity
 from `gatewayTag` and `msixRevision` in `release-policy.json`. The GitHub tag is
@@ -535,7 +531,7 @@ reviewed pull request:
 3. `payloadPackageVersion` to the version reported by the pinned payload;
 4. `msixRevision` to `0`, or increment it for a packaging-only rebuild of the
    same Gateway tag;
-5. remove the temporary `developmentCommit` override and set the workflow's
+5. remove any `developmentCommit` override and set the workflow's
    `openclaw_ref` default and non-manual fallback to the same `approvedCommit`.
 
 After that pull request merges, manually run **Build OpenClaw Gateway MSIX** on
