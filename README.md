@@ -105,13 +105,15 @@ terminal the hint uses the crab identity and the same warning/accent palette as
 |---|---|
 | `clawctl setup` | Confirm packaged `app\openclaw.mjs` exists, provision or reuse the owned isolated session, and install the bundled Node.js runtime in the agent profile. It also configures gateway sign-in recovery without starting a gateway. On a machine that cannot host a session it fails with the Windows requirement described under [Requirements](#requirements). |
 | `clawctl setup --fresh [--force]` | Remove this installation's owned session and package-local state, then run setup again. Without `--force`, incomplete external cleanup stops before local state is erased. `--force` is valid only with `--fresh`; it preserves an explicit warning when cleanup of owned external resources cannot be confirmed, but still stops if bounded local deletion fails. |
-| `clawctl status` | Report the recorded isolated session, installed Node.js runtime, gateway, sign-in recovery, and file-only config readiness when the gateway is not running. It asks the backend to start the recorded provision as its status probe, so it is not a passive diagnostic, but it does not provision a replacement or start the gateway. Use `clawctl gateway-service status` to inspect the gateway alone. |
+| `clawctl status` | Report the recorded isolated session, agent account and shared folder, installed Node.js runtime, gateway, sign-in recovery, and file-only config readiness when the gateway is not running. It asks the backend to start the recorded provision as its status probe, so it is not a passive diagnostic, but it does not provision a replacement or start the gateway. Use `clawctl gateway-service status` to inspect the gateway alone. |
+| `clawctl open` | Open the running managed gateway's Control UI in the default browser. Requires completed `clawctl setup` and an already-running gateway; it probes those prerequisites and fails rather than starting the gateway. Packaged OpenClaw resolves the endpoint, TLS, Control UI base path, and authenticated one-time browser handoff. Authenticated URLs and tokens are not printed. |
 | `clawctl teardown --force` | Confirm deletion, then stop and deprovision the owned session and remove its data and setup state. The MSIX remains installed. |
 | `clawctl pwsh` | Open an interactive PowerShell session inside the agent session. |
 | `clawctl collect-logs [--output <path>]` | Create a redacted host-and-agent diagnostics ZIP. |
 | `clawctl gateway-service start` | Start the OpenClaw gateway in the isolated session and wait for it to listen. Requires setup. |
 | `clawctl gateway-service status` | Inspect the gateway without starting it. When the gateway is not running, it may start/probe only the already-recorded isolated session to report file-only config readiness; it never provisions a replacement or starts the gateway. |
 | `clawctl gateway-service stop` | Stop the gateway while retaining the session and its data. |
+| `clawctl gateway-service restart` | Stop the gateway and start it again as one lifecycle operation. If the stop cannot be verified, it retains the gateway record and does not start a replacement. If no gateway is running, it starts one. |
 | `clawctl --version` | Print the packaged launcher version. |
 
 Bare `clawctl`, `clawctl -h`, and `clawctl --help` print help without changing
@@ -159,19 +161,18 @@ clawctl gateway-service start
 
   Gateway:    ✓ listening
   Port:       18789
-
-  Token:      openclaw gateway auth-token --show
 ```
 
 OpenClaw owns the endpoint configuration, including TLS and a custom Control UI
-base path. The Windows package therefore does not construct an HTTP URL that
-might contradict that configuration. It reports no port when multiple
-unclassified listeners remain. JSON follows the same rule: `gateway.port` is
-present only when identified, and no URL is promised.
-Reaching the Control UI needs the shared gateway token, which
-`openclaw gateway auth-token --show` reveals. `--json` carries the identified
-port but not that command: a script should run it rather than parse a
-suggestion.
+base path. `clawctl status` and `clawctl gateway-service start` therefore do
+not construct an HTTP URL that might contradict that configuration. They report
+no port when multiple unclassified listeners remain; JSON follows the same
+rule, with `gateway.port` present only when identified and no URL promised.
+
+`clawctl open` uses packaged OpenClaw's verified, authenticated browser handoff
+instead of constructing a URL from that port. It does not start or recover the
+gateway: start it first with `clawctl gateway-service start` if the probe says
+it is not running. The command does not print authenticated URLs or tokens.
 
 Help and version requests take precedence over the rest of the command line.
 `clawctl --version bogus` reports the build identity and exits `0` rather than
@@ -247,14 +248,15 @@ list, so an upstream revision that introduces a new native dependency is staged
 automatically. Whole owning package directories are copied rather than
 individual binaries, because a package locates its sibling libraries and helper
 executables relative to its own directory. A packaged preload then redirects
-both CommonJS and ESM resolution to the staged copies, delivered through
-`NODE_OPTIONS` so that the Node.js workers OpenClaw starts inherit it. The
-launcher names that preload rather than composing the variable, and the guest
-appends it to the agent account's own `NODE_OPTIONS`, so an option the agent
-set survives and the invoking host's value never reaches it. Staging is
-idempotent, keyed by package content, and reclaims the superseded copy after an
-upgrade once nothing is still running from it; a launch holds its root for its
-whole lifetime, and a root that is still held is left whole for a later setup.
+both CommonJS and ESM resolution to the staged copies. The launcher places that
+preload on the agent Node.js argument vector so OpenClaw retains it when an
+agent invokes `openclaw` again. Once loaded, the preload appends itself to the
+agent account's own `NODE_OPTIONS` for ordinary Node.js workers, so an option
+the agent set survives and the invoking host's value never reaches it. Staging
+is idempotent, keyed by package content, and reclaims the superseded copy after
+an upgrade once nothing is still running from it; a launch holds its root for
+its whole lifetime, and a root that is still held is left whole for a later
+setup.
 
 Run setup before using `openclaw`, `clawctl pwsh`, or gateway-service start.
 There is no session-free mode: `openclaw` runs inside the session recorded by
@@ -281,23 +283,39 @@ place so an update does not remove a running process's runtime.
 
 ## Selecting the OpenClaw revision
 
-`.github\workflows\gateway-msix.yml` resolves an explicit OpenClaw ref before
-building. Pull-request and `main` push runs use the pinned commit configured in
-both:
+`.github\workflows\gateway-msix.yml` selects **stable** through public npm
+`openclaw@latest` whenever a new packaging run starts. The resolver checks the
+exact published version, its signed upstream tag and commit, and the source
+package version before building. There is no automatic fallback to another
+version or channel; extended-stable and named prereleases are rejected.
+Source selection also checks the MSIX release-version rules before building:
+numeric correction suffixes must be `-2` through `-9`. Unsupported corrections
+are rejected for channel selection, explicit refs, policy pins, and retries.
 
-- `workflow_dispatch.inputs.openclaw_ref.default`;
-- the non-manual fallback in `env.OPENCLAW_REF`.
+The `openclaw-source-resolution` artifact records this choice once per run.
+Retries reuse it without querying the moving channel again. If the snapshot
+is missing or expired (90-day retention), start a new run instead of retrying.
+Package and payload metadata record the resolved source commit and version.
 
-Changing only the workflow-dispatch default does not change automatic builds.
-For a one-time override, run **Build OpenClaw Gateway MSIX** manually and
-provide a tag, branch, or preferably a full 40-character commit SHA in
-`openclaw_ref`. Payload composition validates that the selected OpenClaw
-runtime discovers and activates the packaging-owned Windows Launcher plugin by
-default, both without configuration and with an existing profile that has no
-plugin decision. Runtime inspection verifies its read-only route shape without
-writing enablement or allowlist overrides, then verifies that an explicit disable
-prevents registration. The isolated temporary profile is removed after inspection
-and does not modify user configuration. Incompatible older
+For a one-time unsigned/test override, provide a stable-source tag, branch, or
+full commit SHA in the manual `openclaw_ref` input. Empty means follow stable.
+If compatibility requires an older known-good stable release, a reviewed
+`stableVersion` field in `release-policy.json` can pin its exact version, for
+example `"stableVersion": "2026.9.4"`. A pin is not automatic fallback and does
+not grant official-signing approval.
+
+For official signing, the selected source must match `approvedCommit`,
+`gatewayTag`, and `payloadPackageVersion` in `release-policy.json`. An empty
+input selects stable and checks that approval; an explicit input must be the
+full approved commit SHA.
+
+Payload composition validates that the selected OpenClaw runtime discovers and
+activates the packaging-owned Windows Launcher plugin by default, both without
+configuration and with an existing profile that has no plugin decision. Runtime
+inspection verifies its read-only route shape without writing enablement or
+allowlist overrides, then verifies that an explicit disable prevents registration.
+The isolated temporary profile is removed after inspection and does not modify
+user configuration. Incompatible older
 refs fail instead of producing a package with an unvalidated plugin.
 
 The source build uses that revision's `.github/actions/setup-node-env` action
@@ -311,7 +329,7 @@ runtime-support policy.
 Non-official workflows cache the packed OpenClaw tarball by its resolved
 upstream commit. They also cache each architecture's Windows dependency tree by
 the resolved commit, tarball SHA-256, Node.js version, and payload-build script.
-A tarball cache hit still verifies the recorded commit and SHA-256; a
+A tarball cache hit still verifies the recorded version, commit and SHA-256; a
 dependency-tree hit still runs every payload validation and smoke test.
 Official-signing workflows bypass
 both caches and always rebuild upstream source and Windows dependencies.
@@ -341,16 +359,18 @@ dotnet test .\OpenClaw.Gateway.MSIX.slnx `
   --no-restore
 ```
 
-Payload installation and runtime inspection require Windows and Node.js matching
-the target architecture. CI uses `windows-latest` for x64 and
-`windows-11-vs2026-arm` for ARM64; loading target-native dependencies cannot be
-qualified by cross-compiling them on an x64 host. These jobs validate payload
-loading and packaging, not installed agent-session E2E on a supported host.
-`Build-MSIX.ps1` and `Build-LocalMSIX.ps1 -PayloadDirectory` can still cross-compose
-an already-qualified payload.
-
 `scripts\Build-Payload.ps1` npm-installs an OpenClaw package into an expanded,
-architecture-specific application tree. It validates the Gateway and Control UI
+architecture-specific application tree. Run it on Windows with Node.js matching both
+the selected upstream version and target architecture: native install scripts
+can use `process.arch` instead of npm's target-CPU flag. CI builds x64 on
+`windows-latest` and ARM64 on `windows-11-arm`, using matching Node.js binaries.
+Both payloads run their CLI smoke test. Cross-architecture Node.js execution
+is rejected before staging or npm installation, including when reusing a tree.
+These jobs validate payload loading and packaging, not installed agent-session
+E2E on a supported host. `Build-MSIX.ps1` and
+`Build-LocalMSIX.ps1 -PayloadDirectory` can still cross-compose an already-qualified
+payload.
+It validates the Gateway and Control UI
 build identities on the installed tree, including reused staged installs, then
 provisions the packaging-owned Windows Launcher plugin into the payload copy's
 bundled plugin directory. Its internal package, path, and plugin ID remain
@@ -402,11 +422,16 @@ not packaged-launcher isolation or installed upgrade behavior.
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by
 [`openclaw/openclaw#145409`](https://github.com/openclaw/openclaw/pull/145409).
-Both workflow defaults and the release policy pin stable `v2026.9.5` at
-`ec9c1a13db8938e5a3eaa51fca2e981cde2395a9`, which includes that forwarding.
-Local test-signed qualification does not establish officially signed release
-readiness. Without forwarding, the page uses the browser or
-operating system light/dark preference with a safe built-in palette.
+OpenClaw `v2026.9.5` at `ec9c1a13db8938e5a3eaa51fca2e981cde2395a9`
+includes that forwarding and has been qualified with this default-on plugin.
+Unsigned and test builds follow the stable-source selection above; that
+qualification is not an official runtime approval.
+The official-signing policy remains on the release-approved OpenClaw `v2026.9.4`
+baseline (`3a9d69db306cd7f081e06254cb89c4bcc14a7107`); that approval does not
+establish support for this default-on/theme contract. A compatible runtime
+requires separate reviewed approval before an official release. Without theme
+forwarding, the page uses the browser or operating system light/dark preference
+with a safe built-in palette.
 
 `scripts\Build-MSIX.ps1` downloads the official Node.js archive matching the
 payload's recorded build version and architecture, copies both inputs into
@@ -476,9 +501,9 @@ never official-signing inputs.
 Normal pull-request and push workflows publish unsigned packages for
 validation. Manual runs support three signing modes:
 
-- `unsigned` accepts any OpenClaw branch, tag, or commit and publishes unsigned
+- `unsigned` follows stable or a stable-source override and publishes unsigned
   MSIX packages;
-- `test` accepts any OpenClaw ref and publishes MSIX packages signed with a
+- `test` uses the same source-selection rules and publishes MSIX packages signed with a
   temporary self-signed certificate plus the public `.cer` needed for local
   installation;
 - `official` requires the approved immutable commit from
@@ -490,13 +515,6 @@ and the existing OpenClaw Artifact Signing account and certificate profile.
 Test-signing private keys are generated only on the temporary GitHub runner
 and are deleted before artifacts are uploaded. No signing secret or private
 key is stored in the repository.
-
-Both workflow defaults use `release-policy.json`'s `approvedCommit` unless a
-separate immutable `developmentCommit` is declared. That optional override is
-not an official signing authorization: an `official` run must select
-`approvedCommit`. Any other ref fails before source resolution or build, with
-the required input shown in the error. Unsigned and test-signed runs can use
-another explicitly selected ref.
 
 Official releases derive their GitHub tag and four-part numeric MSIX identity
 from `gatewayTag` and `msixRevision` in `release-policy.json`. The GitHub tag is
@@ -530,9 +548,7 @@ reviewed pull request:
 2. `approvedCommit` to the immutable commit resolved from that tag;
 3. `payloadPackageVersion` to the version reported by the pinned payload;
 4. `msixRevision` to `0`, or increment it for a packaging-only rebuild of the
-   same Gateway tag;
-5. remove any `developmentCommit` override and set the workflow's
-   `openclaw_ref` default and non-manual fallback to the same `approvedCommit`.
+   same Gateway tag.
 
 After that pull request merges, manually run **Build OpenClaw Gateway MSIX** on
 `main` with `openclaw_ref` set to the approved commit and `signing_mode` set to
@@ -555,8 +571,9 @@ release versioning download the hash-pinned standalone x64 and recommended
 `.msixbundle` assets, install each one on a clean GitHub-hosted Windows runner,
 upgrade it in place through the same delivery format, and
 verify that the package family remains stable and a LocalState marker is
-retained. The gate also proves fresh installation of both the standalone and
-bundle candidates. It refuses to run when an OpenClaw Gateway package is
+retained. Changes to source-selection scripts also trigger this check against
+the selected release. The gate also proves fresh installation of both the
+standalone and bundle candidates. It refuses to run when an OpenClaw Gateway package is
 already registered and removes only packages installed by that test
 invocation. It temporarily trusts the ephemeral test-signing certificate in
 the local-machine Trusted People store, as required by Windows deployment, and

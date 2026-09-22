@@ -8,12 +8,7 @@ $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $policyPath = Join-Path $repositoryRoot 'release-policy.json'
 $policy = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json
 $approvedCommit = [string]$policy.approvedCommit
-$unapprovedCommit = if ($policy.PSObject.Properties.Name -contains 'developmentCommit') {
-    [string]$policy.developmentCommit
-}
-else {
-    ('b' * 40)
-}
+$unapprovedCommit = 'b' * 40
 $releaseIdentity = & (
     Join-Path $PSScriptRoot 'Get-MSIXReleaseIdentity.ps1'
 ) `

@@ -88,7 +88,8 @@ public sealed class ClawCtlCommandLineTests
             PowerShell = _ => Task.FromResult(0),
             GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
-            GatewayStop = _ => Task.FromResult(0)
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
         });
 
         Assert.Equal(
@@ -97,6 +98,7 @@ public sealed class ClawCtlCommandLineTests
                 ClawCtlCommandLine.StatusCommandName,
                 ClawCtlCommandLine.CollectLogsCommandName,
                 "teardown",
+                ClawCtlCommandLine.OpenCommandName,
                 "pwsh",
                 "gateway-service"
             ],
@@ -120,13 +122,95 @@ public sealed class ClawCtlCommandLineTests
                 return Task.FromResult(0);
             },
             GatewayStatus = _ => Task.FromResult(0),
-            GatewayStop = _ => Task.FromResult(0)
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
         });
 
         int exitCode = await root.Parse("gateway-service start").InvokeAsync();
 
         Assert.Equal(0, exitCode);
         Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task OpenInvokesItsHandlerAndInheritsOutputOptions()
+    {
+        int opens = 0;
+        var outputOptions = new ClawCtlOutputOptions();
+        RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
+        {
+            Setup = (_, _) => Task.FromResult(0),
+            Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
+            Teardown = (_, _) => Task.FromResult(0),
+            Open = _ =>
+            {
+                opens++;
+                return Task.FromResult(0);
+            },
+            PowerShell = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
+            GatewayStatus = _ => Task.FromResult(0),
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
+        }, outputOptions);
+
+        int exitCode = await root.Parse("open --json --no-color").InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(1, opens);
+        Assert.True(outputOptions.Json);
+        Assert.True(outputOptions.NoColor);
+    }
+
+    [Fact]
+    public async Task GatewayServiceRestartInvokesOnlyTheRestartHandler()
+    {
+        int restarts = 0;
+        RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
+        {
+            Setup = (_, _) => Task.FromResult(0),
+            Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
+            Teardown = (_, _) => Task.FromResult(0),
+            PowerShell = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
+            GatewayStatus = _ => Task.FromResult(0),
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ =>
+            {
+                restarts++;
+                return Task.FromResult(0);
+            }
+        });
+
+        int exitCode = await root.Parse("gateway-service restart").InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(1, restarts);
+    }
+
+    [Fact]
+    public async Task GatewayServiceRestartRejectsTheRecoveryMarker()
+    {
+        RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
+        {
+            Setup = (_, _) => Task.FromResult(0),
+            Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
+            Teardown = (_, _) => Task.FromResult(0),
+            PowerShell = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
+            GatewayStatus = _ => Task.FromResult(0),
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
+        });
+
+        int exitCode = await root
+            .Parse("gateway-service restart --recovery")
+            .InvokeAsync();
+
+        Assert.Equal(1, exitCode);
     }
 
     [Theory]
@@ -150,7 +234,8 @@ public sealed class ClawCtlCommandLineTests
                 return Task.FromResult(0);
             },
             GatewayStatus = _ => Task.FromResult(0),
-            GatewayStop = _ => Task.FromResult(0)
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
         });
 
         int exitCode = await root.Parse(commandLine).InvokeAsync();
@@ -168,6 +253,7 @@ public sealed class ClawCtlCommandLineTests
     [InlineData("gateway-service start --json")]
     [InlineData("gateway-service status --json")]
     [InlineData("gateway-service stop --json")]
+    [InlineData("gateway-service restart --json")]
     public async Task JsonIsAvailableToEveryNonInteractiveCommand(string commandLine)
     {
         var outputOptions = new ClawCtlOutputOptions();
@@ -180,7 +266,8 @@ public sealed class ClawCtlCommandLineTests
             PowerShell = _ => Task.FromResult(0),
             GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
-            GatewayStop = _ => Task.FromResult(0)
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
         }, outputOptions);
 
         int exitCode = await root.Parse(commandLine).InvokeAsync();
@@ -212,6 +299,7 @@ public sealed class ClawCtlCommandLineTests
     [InlineData("gateway-service start --no-color")]
     [InlineData("gateway-service status --no-color")]
     [InlineData("gateway-service stop --no-color")]
+    [InlineData("gateway-service restart --no-color")]
     public async Task NoColorIsAvailableToEveryCommand(string commandLine)
     {
         var outputOptions = new ClawCtlOutputOptions();
@@ -224,7 +312,8 @@ public sealed class ClawCtlCommandLineTests
             PowerShell = _ => Task.FromResult(0),
             GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
-            GatewayStop = _ => Task.FromResult(0)
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
         }, outputOptions);
 
         int exitCode = await root.Parse(commandLine).InvokeAsync();
@@ -268,7 +357,8 @@ public sealed class ClawCtlCommandLineTests
             PowerShell = _ => Task.FromResult(0),
             GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
-            GatewayStop = _ => Task.FromResult(0)
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
         });
 
         int exitCode = await root.Parse("setup --fresh").InvokeAsync();
@@ -294,7 +384,8 @@ public sealed class ClawCtlCommandLineTests
             PowerShell = _ => Task.FromResult(0),
             GatewayStart = (_, _) => Task.FromResult(0),
             GatewayStatus = _ => Task.FromResult(0),
-            GatewayStop = _ => Task.FromResult(0)
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
         });
 
         int exitCode = await root.Parse("setup --fresh --force").InvokeAsync();

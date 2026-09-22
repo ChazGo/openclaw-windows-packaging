@@ -27,7 +27,9 @@ internal sealed record ClawCtlJsonBuild(string Version, string Commit);
 internal sealed record ClawCtlJsonSession(
     string State,
     string? SandboxId = null,
-    string? NodeVersion = null);
+    string? NodeVersion = null,
+    string? AgentUser = null,
+    string? SharedFolder = null);
 
 internal sealed record ClawCtlJsonRuntime(string NodeVersion);
 
@@ -79,6 +81,7 @@ internal static class ClawCtlJson
             StatusCommandResult status => FromStatus(status),
             CollectLogsCommandResult logs => FromCollectLogs(logs),
             TeardownCommandResult teardown => FromTeardown(teardown),
+            OpenCommandResult open => FromOpen(open),
             GatewayCommandResult gateway => FromGateway(gateway),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(result),
@@ -167,7 +170,9 @@ internal static class ClawCtlJson
             Session: new ClawCtlJsonSession(
                 DescribeSession(result.Session.Availability),
                 result.Session.Record?.SandboxId,
-                result.NodeVersion),
+                result.NodeVersion,
+                result.Session.Record?.AgentUserName,
+                result.Session.Record?.WorkspacePath),
             Gateway: new ClawCtlJsonGateway(
                 DescribeGateway(result.Gateway.State),
                 GatewayAddress.ResolvePort(result.Gateway.Record),
@@ -231,6 +236,18 @@ internal static class ClawCtlJson
                 Error: new ClawCtlJsonError(
                     "cli_error",
                     NormalizeMessage(result.Detail ?? result.Message)));
+
+    private static ClawCtlJsonDocument FromOpen(OpenCommandResult result) =>
+        new(
+            result.ExitCode == 0,
+            SchemaVersion,
+            result.Command,
+            Gateway: result.State is { } state
+                ? new ClawCtlJsonGateway(DescribeGateway(state))
+                : null,
+            Error: result.ExitCode == 0
+                ? null
+                : new ClawCtlJsonError("cli_error", NormalizeMessage(result.Message)));
 
     private static void Write(TextWriter output, ClawCtlJsonDocument document) =>
         output.WriteLine(JsonSerializer.Serialize(

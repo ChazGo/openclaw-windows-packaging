@@ -10,10 +10,12 @@ internal sealed record ClawCtlHandlers
     public required Func<CancellationToken, Task<int>> Status { get; init; }
     public required Func<string?, CancellationToken, Task<int>> CollectLogs { get; init; }
     public required Func<bool, CancellationToken, Task<int>> Teardown { get; init; }
+    public Func<CancellationToken, Task<int>> Open { get; init; } = _ => Task.FromResult(1);
     public required Func<CancellationToken, Task<int>> PowerShell { get; init; }
     public required Func<bool, CancellationToken, Task<int>> GatewayStart { get; init; }
     public required Func<CancellationToken, Task<int>> GatewayStatus { get; init; }
     public required Func<CancellationToken, Task<int>> GatewayStop { get; init; }
+    public required Func<CancellationToken, Task<int>> GatewayRestart { get; init; }
 }
 
 internal sealed record SetupOptions(bool Fresh, bool Force);
@@ -36,6 +38,7 @@ internal static class ClawCtlCommandLine
     public const string SetupCommandName = "setup";
     public const string StatusCommandName = "status";
     public const string CollectLogsCommandName = "collect-logs";
+    public const string OpenCommandName = "open";
 
     // Response-file expansion is off. A leading `@` means nothing to clawctl,
     // so it is reported as an unrecognized argument instead of silently reading
@@ -144,6 +147,15 @@ internal static class ClawCtlCommandLine
             outputOptions.NoColor = parsed.GetValue(noColor);
             return handlers.Teardown(parsed.GetValue(teardownForce), cancellationToken);
         });
+        Command open = new(
+            OpenCommandName,
+            "Open the running gateway's Control UI in the default browser.");
+        open.SetAction((parsed, cancellationToken) =>
+        {
+            outputOptions.Json = parsed.GetValue(json);
+            outputOptions.NoColor = parsed.GetValue(noColor);
+            return handlers.Open(cancellationToken);
+        });
         Command powerShell = new(
             "pwsh",
             "Open PowerShell inside the isolated agent. `openclaw` and `node` " +
@@ -187,9 +199,17 @@ internal static class ClawCtlCommandLine
             outputOptions.NoColor = parsed.GetValue(noColor);
             return handlers.GatewayStop(token);
         });
+        Command gatewayRestart = new("restart", "Stop the gateway and start it again.");
+        gatewayRestart.SetAction((parsed, token) =>
+        {
+            outputOptions.Json = parsed.GetValue(json);
+            outputOptions.NoColor = parsed.GetValue(noColor);
+            return handlers.GatewayRestart(token);
+        });
         gateway.Subcommands.Add(gatewayStart);
         gateway.Subcommands.Add(gatewayStatus);
         gateway.Subcommands.Add(gatewayStop);
+        gateway.Subcommands.Add(gatewayRestart);
 
         RootCommand root = new(RootDescription)
         {
@@ -197,6 +217,7 @@ internal static class ClawCtlCommandLine
             status,
             collectLogs,
             teardown,
+            open,
             powerShell,
             gateway
         };

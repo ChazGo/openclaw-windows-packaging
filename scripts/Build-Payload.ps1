@@ -41,13 +41,21 @@ $nodeTarget = & node -p 'process.platform + "/" + process.arch'
 if ($LASTEXITCODE -ne 0) {
     throw 'Unable to determine the payload inspection Node.js platform and architecture.'
 }
-if (-not $IsWindows -or $nodeTarget -cne "win32/$Architecture") {
+if (-not $IsWindows -or $nodeTarget -cnotmatch '^win32/(x64|arm64)$') {
     throw (
         "Payload runtime inspection requires win32/$Architecture Node.js; " +
         "found '$nodeTarget'. Build and inspect on the matching Windows " +
-        'architecture (windows-11-vs2026-arm for ARM64). To cross-compose, ' +
+        'architecture. To cross-compose, ' +
         'supply an already-qualified payload to Build-MSIX.ps1 or ' +
         'Build-LocalMSIX.ps1 -PayloadDirectory instead.'
+    )
+}
+$nodeArchitecture = $nodeTarget.Substring('win32/'.Length)
+# npm's target CPU flag does not change process.arch inside dependency install scripts.
+if ($nodeArchitecture -cne $Architecture) {
+    throw (
+        "Node.js architecture '$nodeArchitecture' does not match the '$Architecture' payload. " +
+        "Run this build with $Architecture Node.js on a compatible Windows runner."
     )
 }
 $npmVersion = & npm --version
@@ -65,6 +73,7 @@ $expectedStagingMetadata = [ordered]@{
     resolvedCommit = [string]$sourceMetadata.resolvedCommit
     packageVersion = [string]$sourceMetadata.packageVersion
     nodeVersion = $nodeVersion
+    nodeArchitecture = $nodeArchitecture
     npmVersion = $npmVersion
     packageSha256 = $packageHash
 }

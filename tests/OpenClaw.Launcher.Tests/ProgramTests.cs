@@ -254,6 +254,28 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
+    public async Task ManualGatewayRestartAcknowledgesBeforeAStartFailure()
+    {
+        SessionRuntime runtime = await SetUpSessionAsync().ConfigureAwait(true);
+        ((FakeMxcSessionClient)runtime.Backend).ExecuteFailure =
+            new SessionException("gateway restart failed");
+
+        await Assert.ThrowsAsync<SessionException>(
+            () => Program.RunControlAsync(
+                CreateSetupOptions(Path.Combine(_testDirectory, "app")),
+                ["gateway-service", "restart"],
+                _ => { },
+                TextWriter.Null,
+                TextWriter.Null,
+                installationLifecycle: new FailingFreshLifecycle(runtime),
+                getLogonSessionId: () => "logon-restart"));
+
+        var store = new GatewayGuidanceStateStore(
+            runtime.Paths.GatewayGuidanceStatePath);
+        Assert.True(store.IsAcknowledged("logon-restart"));
+    }
+
+    [Fact]
     public async Task RetainedRecoveryScriptUpgradesWithoutManualAcknowledgement()
     {
         SessionRuntime runtime = await SetUpSessionAsync().ConfigureAwait(true);
@@ -295,10 +317,8 @@ public sealed class ProgramTests : IDisposable
     }
 
     /// <summary>
-    /// The host never composes the agent's <c>NODE_OPTIONS</c>. It names the
-    /// preload, and the guest appends it to whatever the agent already set, so
-    /// settings such as <c>--max-old-space-size</c> survive setup and the
-    /// host's own value never reaches the agent.
+    /// The preload travels on Node's argument vector so OpenClaw's reconstructed
+    /// agent CLI retains it without replacing the agent's <c>NODE_OPTIONS</c>.
     /// </summary>
     [Fact]
     public async Task AgentLaunchNamesTheNativeRedirectWithoutSettingNodeOptions()
@@ -357,10 +377,16 @@ public sealed class ProgramTests : IDisposable
                     : null).ConfigureAwait(true);
 
         Assert.NotNull(launched);
+        Assert.Equal("--import", launched.Arguments![0]);
         Assert.Contains(
             OpenClawRuntimeEnvironment.NativeRedirectFileName,
-            launched.NodeOptionsSuffix,
+            launched.Arguments[1],
             StringComparison.Ordinal);
+        Assert.Equal(
+            Path.Combine(applicationDirectory, "openclaw.mjs"),
+            launched.Arguments[2]);
+        Assert.Equal("doctor", launched.Arguments[3]);
+        Assert.Null(launched.NodeOptionsSuffix);
         Assert.Equal(nativeRoot, launched.NativeRootPath);
 
         // The assigned environment must not carry NODE_OPTIONS at all: it
@@ -399,7 +425,7 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task PowerShellControlCExitsSilentlyWithPortableInterruptedCode()
+    public async Task PowerShellLaunchUsesTheNativeAwareShimAndMapsControlC()
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
         HostOptions options = CreateSetupOptions(applicationDirectory);
@@ -413,6 +439,10 @@ public sealed class ProgramTests : IDisposable
             TextWriter.Null,
             installationLifecycle: lifecycle);
         Assert.Equal(0, setupExitCode);
+        string nativeRoot = Path.Combine(_testDirectory, "agent-native", "0123456789abcdef");
+        Directory.CreateDirectory(nativeRoot);
+        SetupRecord staged = runtime.SetupState.Read(runtime.ApplicationId).Record!;
+        runtime.SetupState.Write(staged with { AgentNativeRoot = nativeRoot });
         _lastSessionBackend!.ExecuteBehavior = _ =>
         {
             string requestPath = Directory.GetFiles(
@@ -429,8 +459,15 @@ public sealed class ProgramTests : IDisposable
                 }));
             return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
         };
+        SessionLaunchRequest? launched = null;
         _lastSessionBackend!.AttachedBehavior = _ =>
-            Task.FromResult(unchecked((int)0xc000013a));
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            launched = SessionLaunchProtocol.ReadRequest(File.ReadAllText(requestPath));
+            return Task.FromResult(unchecked((int)0xc000013a));
+        };
         using var output = new StringWriter();
         using var error = new StringWriter();
 
@@ -445,6 +482,25 @@ public sealed class ProgramTests : IDisposable
         Assert.Equal(130, exitCode);
         Assert.Equal(string.Empty, output.ToString());
         Assert.Equal(string.Empty, error.ToString());
+        Assert.NotNull(launched);
+        Assert.Equal(nativeRoot, launched.NativeRootPath);
+        Assert.Null(launched.NodeOptionsSuffix);
+        Assert.False(
+            launched.Environment!.ContainsKey(
+                OpenClawRuntimeEnvironment.NativeApplicationRootVariable));
+        Assert.False(
+            launched.Environment.ContainsKey(
+                OpenClawRuntimeEnvironment.NativeStagedRootVariable));
+        Assert.Equal(
+            applicationDirectory,
+            launched.Environment[AgentToolShim.NativeApplicationRootVariable]);
+        Assert.Equal(
+            nativeRoot,
+            launched.Environment[AgentToolShim.NativeStagedRootVariable]);
+        Assert.Contains(
+            OpenClawRuntimeEnvironment.NativeRedirectFileName,
+            launched.Environment[AgentToolShim.NativePreloadUrlVariable],
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -843,6 +899,27 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
+    public async Task StatusBeforeSetupOmitsAgentAndSharedFolder()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            CreateSetupOptions(applicationDirectory),
+            ["status"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: new FailingFreshLifecycle(CreateSessionRuntime()));
+
+        Assert.Equal(0, exitCode);
+        string status = output.ToString();
+        Assert.DoesNotContain("Agent:", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("Shared folder:", status, StringComparison.Ordinal);
+        Assert.Contains("clawctl setup", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StatusReportsSessionRuntimeGatewayAndRecovery()
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
@@ -874,6 +951,9 @@ public sealed class ProgramTests : IDisposable
         Assert.Equal(0, statusExitCode);
         string status = statusOutput.ToString();
         Assert.Contains("Session:", status, StringComparison.Ordinal);
+        Assert.Contains("Agent:", status, StringComparison.Ordinal);
+        Assert.Contains("agent_1", status, StringComparison.Ordinal);
+        Assert.Contains("Shared folder:", status, StringComparison.Ordinal);
         Assert.Contains("Runtime:", status, StringComparison.Ordinal);
         Assert.Contains("Node.js 24.20.0", status, StringComparison.Ordinal);
         Assert.Contains("Gateway:", status, StringComparison.Ordinal);
@@ -922,6 +1002,10 @@ public sealed class ProgramTests : IDisposable
         Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("running", root.GetProperty("session").GetProperty("state").GetString());
         Assert.Equal("24.20.0", root.GetProperty("session").GetProperty("nodeVersion").GetString());
+        Assert.Equal("agent_1", root.GetProperty("session").GetProperty("agentUser").GetString());
+        Assert.Equal(
+            ((FakeMxcSessionClient)runtime.Backend).Metadata!.EphemeralWorkspacePath,
+            root.GetProperty("session").GetProperty("sharedFolder").GetString());
         Assert.Equal("not-started", root.GetProperty("gateway").GetProperty("state").GetString());
         JsonElement readiness =
             root.GetProperty("gateway").GetProperty("readiness");
@@ -1149,6 +1233,8 @@ public sealed class ProgramTests : IDisposable
             "action-required",
             root.GetProperty("recovery").GetProperty("state").GetString());
         Assert.Equal("cli_error", root.GetProperty("error").GetProperty("type").GetString());
+        Assert.False(root.GetProperty("session").TryGetProperty("agentUser", out _));
+        Assert.False(root.GetProperty("session").TryGetProperty("sharedFolder", out _));
     }
 
     [Fact]
@@ -1770,6 +1856,356 @@ public sealed class ProgramTests : IDisposable
                 name == "OPENCLAW_SESSION" ? "0" : null));
 
         Assert.False(sessionRuntimeCreated);
+    }
+
+    [Fact]
+    public async Task BrowserLaunchSucceedsWhenShellExecutionReturnsNoProcess()
+    {
+        await Program.LaunchBrowserAsync(
+            "http://127.0.0.1:18789/#token=secret",
+            _ => null);
+    }
+
+    [Fact]
+    public async Task OpenWithoutSetupFailsNormallyWithoutStartingWork()
+    {
+        SessionRuntime runtime = CreateSessionRuntime();
+        var lifecycle = new FailingFreshLifecycle(runtime);
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        bool browserLaunched = false;
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(null, null, []),
+            ["open"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            launchBrowserAsync: _ =>
+            {
+                browserLaunched = true;
+                return Task.CompletedTask;
+            });
+
+        string text = FlattenRenderedText(output.ToString());
+        Assert.Equal(1, exitCode);
+        Assert.Contains("has not been set up", text, StringComparison.Ordinal);
+        Assert.Contains("clawctl setup", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("This shouldn't happen", text, StringComparison.Ordinal);
+        Assert.Empty(backend.Calls);
+        Assert.False(browserLaunched);
+    }
+
+    [Fact]
+    public async Task OpenWithIncompleteSetupFailsNormallyWithoutStartingWork()
+    {
+        SessionRuntime runtime = CreateSessionRuntime();
+        runtime.SetupState.Write(new SetupRecord
+        {
+            ApplicationId = runtime.ApplicationId,
+            Phase = SetupPhase.Preparing
+        });
+        var lifecycle = new FailingFreshLifecycle(runtime);
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        bool browserLaunched = false;
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(null, null, []),
+            ["open"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: lifecycle,
+            launchBrowserAsync: _ =>
+            {
+                browserLaunched = true;
+                return Task.CompletedTask;
+            });
+
+        string text = FlattenRenderedText(output.ToString());
+        Assert.Equal(1, exitCode);
+        Assert.Contains("setup is incomplete", text, StringComparison.Ordinal);
+        Assert.Contains("clawctl setup", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("This shouldn't happen", text, StringComparison.Ordinal);
+        Assert.Empty(backend.Calls);
+        Assert.False(browserLaunched);
+    }
+
+    [Fact]
+    public async Task OpenWithNoRunningGatewayDoesNotRunTheDashboardOrLaunchTheBrowser()
+    {
+        SessionRuntime runtime = await SetUpSessionAsync();
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        int initialBackendCalls = backend.Calls.Count;
+        bool browserLaunched = false;
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(
+                Path.Combine(_testDirectory, "app"),
+                Path.Combine(_testDirectory, "node-v24.15.0-win-x64.zip"),
+                []),
+            ["open"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            installationLifecycle: new StubbedRecoveryLifecycle(runtime),
+            launchBrowserAsync: _ =>
+            {
+                browserLaunched = true;
+                return Task.CompletedTask;
+            });
+
+        string text = FlattenRenderedText(output.ToString());
+        Assert.Equal(1, exitCode);
+        Assert.Contains("clawctl gateway-service start", text, StringComparison.Ordinal);
+        Assert.Equal(initialBackendCalls, backend.Calls.Count);
+        Assert.False(browserLaunched);
+    }
+
+    [Theory]
+    [InlineData(51789, 51789, 0, false, 0, 1, true)]
+    [InlineData(3000, 18789, 0, false, 1, 0, true)]
+    [InlineData(18789, 18789, 0, true, 1, 0, true)]
+    [InlineData(51789, 51789, 51790, false, 0, 1, false)]
+    [InlineData(51789, 0, 0, false, 1, 0, false)]
+    public async Task OpenBindsBrowserActivationToTheObservedGatewayAndCurrentSession(
+        int handoffPort,
+        int observedPort,
+        int additionalObservedPort,
+        bool replaceSessionBeforeValidation,
+        int expectedExitCode,
+        int expectedBrowserLaunches,
+        bool expectedPortOverride)
+    {
+        SessionRuntime runtime = await SetUpSessionAsync();
+        SessionRecord session = runtime.RequireSetup();
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        int[] observedPorts = observedPort == 0
+            ? []
+            : additionalObservedPort == 0
+                ? [observedPort]
+                : [observedPort, additionalObservedPort];
+        string browserUrl = $"https://127.0.0.1:{handoffPort}/control#token=one-time-secret";
+        var logs = new List<string>();
+        var launchedUrls = new List<string>();
+        SessionLaunchRequest? dashboardRequest = null;
+        File.WriteAllText(
+            Path.Combine(_testDirectory, "node-v24.20.0-win-x64.zip"),
+            "fixture");
+        string nativeRoot = Path.Combine(_testDirectory, "agent-native");
+        Directory.CreateDirectory(nativeRoot);
+        SetupRecord staged = runtime.SetupState.Read(runtime.ApplicationId).Record!;
+        runtime.SetupState.Write(staged with { AgentNativeRoot = nativeRoot });
+
+        runtime.GatewayState.Write(new GatewayRecord
+        {
+            SandboxId = session.SandboxId,
+            ProcessId = 42,
+            ProcessStartTimeUtc = DateTimeOffset.UtcNow,
+            HelperPath = runtime.HelperPath,
+            Port = 18789,
+            ObservedPorts = observedPorts,
+        });
+        backend.ExecuteBehavior = _ =>
+        {
+            string workspace = backend.Metadata!.EphemeralWorkspacePath;
+            string[] inspectionRequests = Directory.GetFiles(workspace, "inspect-*.json");
+            if (inspectionRequests.Length == 1)
+            {
+                string inspectionRequestPath = inspectionRequests[0];
+                SessionInspectRequest inspectionRequest = SessionInspectProtocol.ReadRequest(
+                    File.ReadAllText(inspectionRequestPath));
+                File.WriteAllText(
+                    SessionLaunchProtocol.ResultPathFor(inspectionRequestPath),
+                    SessionInspectProtocol.SerializeResult(new SessionInspectResult
+                    {
+                        RequestId = inspectionRequest.RequestId,
+                        ProcessFound = true,
+                        StartTimeMatches = true,
+                        PortListening = true,
+                        ListeningPorts = observedPorts,
+                        ListenerOwned = true,
+                    }));
+                return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
+            }
+
+            string requestPath = Directory.GetFiles(workspace, "launch-*.json")
+                .Single(path => !path.EndsWith(".result.json", StringComparison.Ordinal));
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            dashboardRequest = request;
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.SerializeResult(new SessionLaunchResult
+                {
+                    RequestId = request.RequestId,
+                    Launched = true,
+                    ExitCode = 0,
+                }));
+            return Task.FromResult(new MxcExecutionResult(
+                0,
+                // Mirrors the packaged upstream `dashboard --json` field layout so the
+                // handoff is validated against the shape the guest actually returns.
+                $$"""
+                {"ok":true,"url":"https://127.0.0.1:{{handoffPort}}/","httpUrl":"https://127.0.0.1:{{handoffPort}}/","wsUrl":"ws://127.0.0.1:{{handoffPort}}","port":{{handoffPort}},"tokenIncluded":false,"browserUrl":"{{browserUrl}}","browserBootstrapExpiresAtMs":1790019149639}
+                """,
+                string.Empty));
+        };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(
+                Path.Combine(_testDirectory, "app"),
+                Path.Combine(_testDirectory, "node-v24.20.0-win-x64.zip"),
+                []),
+            ["open", "--json"],
+            logs.Add,
+            output,
+            TextWriter.Null,
+            installationLifecycle: new StubbedRecoveryLifecycle(runtime),
+            launchBrowserAsync: url =>
+            {
+                launchedUrls.Add(url);
+                return Program.LaunchBrowserAsync(url, _ => null);
+            },
+            beforeBrowserValidation: replaceSessionBeforeValidation
+                ? () => new SessionStateStore(runtime.Paths.SessionStatePath).Write(
+                    session with { Generation = "replacement-generation" })
+                : null);
+
+        string rendered = output.ToString();
+        Assert.Equal(expectedExitCode, exitCode);
+        Assert.NotNull(dashboardRequest);
+        Assert.Equal(
+            [
+                "--import",
+                new Uri(Program.ResolveNativeRedirectPreloadPath()).AbsoluteUri,
+                Path.Combine(_testDirectory, "app", "openclaw.mjs"),
+                "dashboard",
+                "--json"
+            ],
+            dashboardRequest.Arguments);
+        Assert.Null(dashboardRequest.NodeOptionsSuffix);
+        Assert.Equal(nativeRoot, dashboardRequest.NativeRootPath);
+        foreach ((string name, string value) in OpenClawRuntimeEnvironment.BuildNativeRedirect(
+            Path.Combine(_testDirectory, "app"),
+            nativeRoot))
+        {
+            Assert.Equal(value, dashboardRequest.Environment![name]);
+        }
+        if (expectedPortOverride)
+        {
+            Assert.Equal(
+                observedPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                dashboardRequest.Environment![GatewayConfigurationStore.PortVariable]);
+        }
+        else
+        {
+            Assert.False(
+                dashboardRequest.Environment!.ContainsKey(GatewayConfigurationStore.PortVariable));
+        }
+        Assert.Equal(expectedBrowserLaunches, launchedUrls.Count);
+        if (expectedBrowserLaunches == 1)
+        {
+            Assert.Equal(browserUrl, launchedUrls[0]);
+        }
+        using JsonDocument result = JsonDocument.Parse(rendered);
+        Assert.Equal(expectedExitCode == 0, result.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("open", result.RootElement.GetProperty("command").GetString());
+        Assert.Equal("running", result.RootElement.GetProperty("gateway").GetProperty("state").GetString());
+        Assert.DoesNotContain(browserUrl, rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("one-time-secret", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(browserUrl, string.Join(Environment.NewLine, logs), StringComparison.Ordinal);
+        Assert.DoesNotContain("one-time-secret", string.Join(Environment.NewLine, logs), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpenRunningGatewayHandlesBrowserShellFailureWithoutLeakingTheAuthenticatedUrl()
+    {
+        SessionRuntime runtime = await SetUpSessionAsync();
+        SessionRecord session = runtime.RequireSetup();
+        var backend = (FakeMxcSessionClient)runtime.Backend;
+        const string browserUrl = "https://127.0.0.1:18789/control#token=one-time-secret";
+        var logs = new List<string>();
+        File.WriteAllText(
+            Path.Combine(_testDirectory, "node-v24.20.0-win-x64.zip"),
+            "fixture");
+
+        runtime.GatewayState.Write(new GatewayRecord
+        {
+            SandboxId = session.SandboxId,
+            ProcessId = 42,
+            ProcessStartTimeUtc = DateTimeOffset.UtcNow,
+            HelperPath = runtime.HelperPath,
+            Port = 18789,
+            ObservedPorts = [18789],
+        });
+        backend.ExecuteBehavior = _ =>
+        {
+            string workspace = backend.Metadata!.EphemeralWorkspacePath;
+            string[] inspectionRequests = Directory.GetFiles(workspace, "inspect-*.json");
+            if (inspectionRequests.Length == 1)
+            {
+                string inspectionRequestPath = inspectionRequests[0];
+                SessionInspectRequest inspectionRequest = SessionInspectProtocol.ReadRequest(
+                    File.ReadAllText(inspectionRequestPath));
+                File.WriteAllText(
+                    SessionLaunchProtocol.ResultPathFor(inspectionRequestPath),
+                    SessionInspectProtocol.SerializeResult(new SessionInspectResult
+                    {
+                        RequestId = inspectionRequest.RequestId,
+                        ProcessFound = true,
+                        StartTimeMatches = true,
+                        PortListening = true,
+                        ListeningPorts = [18789],
+                        ListenerOwned = true,
+                    }));
+                return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
+            }
+
+            string requestPath = Directory.GetFiles(workspace, "launch-*.json")
+                .Single(path => !path.EndsWith(".result.json", StringComparison.Ordinal));
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.SerializeResult(new SessionLaunchResult
+                {
+                    RequestId = request.RequestId,
+                    Launched = true,
+                    ExitCode = 0,
+                }));
+            return Task.FromResult(new MxcExecutionResult(
+                0,
+                $$"""{"ok":true,"browserUrl":"{{browserUrl}}"}""",
+                string.Empty));
+        };
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(
+                Path.Combine(_testDirectory, "app"),
+                Path.Combine(_testDirectory, "node-v24.20.0-win-x64.zip"),
+                []),
+            ["open", "--json"],
+            logs.Add,
+            output,
+            TextWriter.Null,
+            installationLifecycle: new StubbedRecoveryLifecycle(runtime),
+            launchBrowserAsync: url => Program.LaunchBrowserAsync(
+                url,
+                _ => throw new NotSupportedException($"shell activation failed for {browserUrl}")));
+
+        string rendered = output.ToString();
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("default browser could not be opened", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(browserUrl, rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("one-time-secret", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(browserUrl, string.Join(Environment.NewLine, logs), StringComparison.Ordinal);
+        Assert.DoesNotContain("one-time-secret", string.Join(Environment.NewLine, logs), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -55,12 +55,19 @@ or package version logic:
 .\scripts\Test-OpenClawCacheKey.Tests.ps1
 .\scripts\Test-OpenClawPackage.Tests.ps1
 .\scripts\Test-MSIXReleaseIdentity.Tests.ps1
+.\scripts\Test-OpenClawSource.Tests.ps1
 .\scripts\Test-WorkflowPackageVersion.Tests.ps1
 .\scripts\Test-GitHooks.Tests.ps1
 ```
 
+The source-selection tests use offline npm and GitHub fixtures.
+
 The Node.js input suite requires Node.js and npm. It builds a dependency-free
-local fixture; it does not download or build OpenClaw.
+local fixture, including its install script, for the running Node.js
+architecture; it does not download or build OpenClaw. CI also runs this suite
+on the native x64 and ARM64 packaging runners. Payload installation requires
+Node.js to match the target architecture; npm's CPU flags alone do not change
+the architecture seen by dependency install scripts.
 
 Run the NativeAOT publish when you change host JSON, reflection, interop, or
 anything else that is trimming-sensitive. A JIT `dotnet build` does not
@@ -201,11 +208,12 @@ bypassable, and required CI checks remain authoritative.
   dependency packages that carry native artifacts into agent LocalState and
   redirects resolution to them. That set is discovered by scanning, never
   hard-coded, and everything else keeps executing from the package. The agent
-  account owns its own `PATH` and `NODE_OPTIONS`: name the directory or the
-  option in the launch request and let the guest compose them, because
-  host-supplied environment values are assigned over the agent's. Reclaim a
-  staged root only when nothing is running from it; every launch holds its root
-  for its lifetime, and a held root is left whole for a later setup.
+  account owns its own `PATH` and `NODE_OPTIONS`: name the runtime directory in
+  the launch request, place the preload on Node's argument vector, and let the
+  preload append itself to the agent's options for child processes. Do not
+  assign the invoking host's values over the agent's. Reclaim a staged root
+  only when nothing is running from it; every launch holds its root for its
+  lifetime, and a held root is left whole for a later setup.
 - Keep x64 and ARM64 behavior synchronized across the workflow matrix, scripts,
   project runtime identifiers, manifest content, and signing validation.
 - Restore `src\OpenClaw.SessionHost\OpenClaw.SessionHost.csproj` separately
