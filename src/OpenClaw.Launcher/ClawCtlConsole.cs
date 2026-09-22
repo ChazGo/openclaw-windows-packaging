@@ -1,4 +1,5 @@
 using System.Globalization;
+using OpenClaw.Launcher.Gateway;
 using OpenClaw.SessionProtocol;
 using Spectre.Console;
 using Spectre.Console.Rendering;
@@ -115,6 +116,50 @@ internal static class ClawCtlConsole
         Render(output, paragraph, useColor, unicode);
     }
 
+    internal static Task<GatewayStartResult> NarrateGatewayStartAsync(
+        TextWriter output,
+        bool useColor,
+        bool narrate,
+        bool outputIsInteractive,
+        Func<IProgress<GatewayStartProgress>, Task<GatewayStartResult>> start) =>
+        NarrateAsync(
+            output,
+            useColor,
+            narrate,
+            outputIsInteractive,
+            GatewayStartProgress.Initial,
+            start);
+
+    internal static void WriteGatewayStartWarning(
+        TextWriter output,
+        string detail,
+        bool useColor = false,
+        bool? useUnicode = null)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentException.ThrowIfNullOrWhiteSpace(detail);
+
+        bool unicode = useUnicode ?? SupportsUnicode(output);
+        var paragraph = new Paragraph();
+        if (unicode)
+        {
+            paragraph.Append($"{IdentityMark} ", WarningStyle);
+        }
+
+        paragraph.Append("Warning:", WarningStyle);
+        paragraph.Append($" {detail}");
+        Render(output, paragraph, useColor, unicode);
+
+        // The retry command is rendered separately so the width-constrained
+        // paragraph above cannot wrap it across lines, which would make it
+        // unusable to copy.
+        var retry = new Paragraph();
+        retry.Append("Retry with ");
+        retry.Append("clawctl gateway-service start", AccentStyle);
+        retry.Append(".");
+        Render(output, retry, useColor, unicode);
+    }
+
     internal static void WriteVersion(TextWriter output, bool useColor = false)
     {
         ArgumentNullException.ThrowIfNull(output);
@@ -221,6 +266,21 @@ internal static class ClawCtlConsole
         bool useColor,
         bool narrate,
         ClawCtlProgress initial,
+        Func<IProgress<ClawCtlProgress>, Task<T>> operation) =>
+        await NarrateAsync(
+            output,
+            useColor,
+            narrate,
+            IsInteractiveConsole(output),
+            initial,
+            operation).ConfigureAwait(false);
+
+    private static async Task<T> NarrateAsync<T>(
+        TextWriter output,
+        bool useColor,
+        bool narrate,
+        bool outputIsInteractive,
+        ClawCtlProgress initial,
         Func<IProgress<ClawCtlProgress>, Task<T>> operation)
     {
         ArgumentNullException.ThrowIfNull(output);
@@ -233,7 +293,7 @@ internal static class ClawCtlConsole
             return await operation(NullProgress.Instance).ConfigureAwait(false);
         }
 
-        if (!IsInteractiveConsole(output))
+        if (!outputIsInteractive)
         {
             await output.WriteLineAsync($"{new string(' ', Indent)}{initial.Message}")
                 .ConfigureAwait(false);
