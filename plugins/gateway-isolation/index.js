@@ -1,6 +1,14 @@
 const ISOLATION_ENVIRONMENT_VARIABLE = "CLAWCTL_GATEWAY_ISOLATION";
 const STATUS_PATH = "/plugins/gateway-isolation/status";
 const THEME_MESSAGE_TYPE = "openclaw:widget-theme";
+const ISOLATION_AGENT_CONTEXT = [
+  "## Windows agent session",
+  "This Gateway and tools executing locally here run in a separate Windows agent session, not the user's interactive desktop. A tool target called host or gateway does not by itself mean the user's session.",
+  "Dialogs, browser windows, and other GUI started here are not visible or interactive for the user. Do not launch GUI expecting user participation. Use the user's connected chat, web, TUI, or other supported client. When participation is needed, prefer a supported CLI, headless, device-code, or text workflow; relay safe steps or verification URLs and wait for the required response. Do not invent authentication flows, collect or expose credentials/tokens, bypass MFA/consent, or disable isolation. Send sensitive verification material only through a supported private route to the requesting user.",
+  "Keep scratch files, dependencies, repositories, and working trees private when appropriate. A path existing or being readable here does not prove user access. Hand off only intended deliverables through a supported client attachment/export or a copy in the actual host-reported shared folder. Preserve private originals; do not export secrets, caches, or whole workspaces by default. Verify recipient-side access or delivery where feasible and state what remains unverified.",
+  "Discover the real sharing location or API from host-provided metadata or the user. Never invent a shared directory. If no supported route is available, explain the limitation and ask for a supported destination. Do not use administrator Explorer, broad ACL changes, moving everything to Public, or weakening isolation as a workaround.",
+  "Remote and user-session nodes have their own filesystem and UI context. Use a UI route only when its execution location, capability, and authorization are established; a connected client or node alone proves none of these. Explain these limits when they affect the user's next action, not on every turn.",
+].join("\n\n");
 const COMMAND_GROUPS = [
   {
     id: "clawctl",
@@ -373,14 +381,18 @@ function writeHtmlResponse(response, statusCode, html) {
   response.end(html);
 }
 
-export function createGatewayIsolationPlugin(env = process.env) {
+export function createGatewayIsolationPlugin(env = process.env, platform = process.platform) {
   const launchMode = readGatewayIsolationMode(env);
 
   return {
     id: "gateway-isolation",
     name: "Windows Launcher",
-    description: "Reports the Windows launch mode selected for the running Gateway.",
+    description: "Reports Windows isolation status and supplies local-session agent guidance.",
     register(api) {
+      if (platform === "win32" && launchMode === "enabled") {
+        // v2026.9.4 can replace system-context additions on runtime-only turns.
+        api.on("before_prompt_build", () => ({ prependContext: ISOLATION_AGENT_CONTEXT }));
+      }
       api.session.controls.registerControlUiDescriptor({
         surface: "tab",
         id: "gateway-isolation",

@@ -446,6 +446,24 @@ and restrictive allowlists retain OpenClaw's standard precedence; the package
 does not rewrite them. Direct-Node UI fixtures verify rendering and interactions,
 not packaged-launcher isolation or installed upgrade behavior.
 
+The same plugin supplies agent instructions on Windows when the launcher report
+is exactly `enabled`. Before supported agent runs, it prepends context explaining
+that local GUI is not the user's desktop, user participation needs a supported
+text/headless route, and private work should stay private while only intended
+deliverables are handed off. Remote or user-session nodes require their own
+capability and authorization checks. This is guidance, not isolation enforcement
+or a file-export feature; it does not install a skill or overwrite workspace
+instructions or configuration.
+
+The plugin does not receive or invent a shared-folder path. Use a supported
+client attachment or discover the real `session.sharedFolder` through
+`clawctl status --json` in the user's normal terminal; that command can start the
+recorded session. Agent-side file access alone does not prove user access.
+The prompt hook also respects `hooks.allowPromptInjection=false` and
+`hooks.allowConversationAccess=false` under the plugin's configuration entry.
+Coverage and the local-only runtime proof are described in
+[local development](docs/local-development.md#agent-context-guidance).
+
 Full selected-theme cohesion requires the generic plugin-frame theme forwarding
 merged by
 [`openclaw/openclaw#145409`](https://github.com/openclaw/openclaw/pull/145409).

@@ -192,6 +192,43 @@ finally {
 
 ## Checks that match the change
 
+### Agent context guidance
+
+Run `.\scripts\Test-GatewayIsolationPlugin.Tests.ps1` for the Windows Launcher
+plugin's output, platform/report gates, staging, and payload inspection.
+
+For actual prompt coverage, use a prepared, dependency-complete OpenClaw
+application directory containing this checkout's plugin under
+`dist\extensions\gateway-isolation`:
+
+```powershell
+.\scripts\Test-GatewayIsolationContext.ps1 -OpenClawDirectory .\payload\x64\app
+```
+
+This Windows-only lane verifies the application's build identity against
+`release-policy.json` and rejects stale plugin files. It does not download,
+build, install, or change the input application. Its disposable profile and
+workspace use synthetic data, a stripped child environment, a loopback-only
+fake provider on an allocated port, and only the `read` tool. No external model,
+real account, package registration, or scheduled task is involved.
+
+The fixture captures actual embedded-runner requests before the first tool,
+through a forced context-overflow/compaction retry, on the next turn, and in
+new, subagent-key, and cron-key sessions. It checks one complete instruction
+block rather than just hook registration, plus plugin/hook opt-outs and
+unchanged user configuration and instruction files. It does not schedule cron
+jobs, spawn remote agents, evaluate model obedience, or prove attachment
+delivery/user-side filesystem access.
+
+The plugin uses `before_prompt_build` with `prependContext`. The approved
+v2026.9.4 runtime can replace system-context additions on runtime-only events;
+this lane does not synthesize those events or qualify external CLI/realtime
+backends. Raw-model and settled-finalization operations omit prompt hooks.
+Do not treat successful registration as universal context coverage. Repeat
+the request-boundary proof when the approved runtime changes.
+
+### Managed code and packaging
+
 For ordinary managed-code changes, use the contributor quality and test lanes:
 
 ```powershell
