@@ -64,6 +64,19 @@ internal static class ClawCtlConsole
             case OpenCommandResult open:
                 WriteOpen(view, open);
                 break;
+            case CompletionCommandResult completion:
+                if (completion.ProfilePath is null)
+                {
+                    output.Write(completion.Script);
+                    return;
+                }
+                view.Row("Profile", new Text(completion.ProfilePath));
+                view.Row(
+                    "OpenClaw completion",
+                    new Text(completion.CachePath is null
+                        ? "not requested"
+                        : $"cached at {completion.CachePath}"));
+                break;
             case GatewayCommandResult gateway:
                 WriteGateway(view, gateway);
                 break;

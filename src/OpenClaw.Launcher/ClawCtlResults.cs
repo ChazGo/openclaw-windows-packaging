@@ -82,6 +82,15 @@ internal sealed record OpenCommandResult(
     public string Command => "open";
 }
 
+internal sealed record CompletionCommandResult(
+    string Script,
+    string? ProfilePath,
+    string? CachePath,
+    int ExitCode) : IClawCtlResult
+{
+    public string Command => "completion";
+}
+
 internal sealed record GatewayCommandResult(
     string Action,
     GatewayState State,

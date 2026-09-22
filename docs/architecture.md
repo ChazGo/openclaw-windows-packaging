@@ -31,6 +31,26 @@ activation, while avoiding two launchers that could drift in AOT settings,
 diagnostics, or runtime composition. It also protects transparent forwarding:
 `openclaw` arguments are OpenClaw-owned and never become `clawctl` options.
 
+## Completion stays owned by the installed runtime
+
+`clawctl completion` writes completion for both aliases to standard output.
+`clawctl completion --install` adds a marked loader to the invoking user's
+PowerShell profile. Each new shell resolves the installed `clawctl` application
+and sources its current completion output, so package updates do not require a
+profile rewrite. The profile update changes only the marked byte range and
+replaces the file atomically, so an existing profile's encoding, line endings,
+and unrelated content survive.
+
+The payload build asks the pinned OpenClaw application to generate its
+PowerShell completion script, validates the result, and includes those
+immutable bytes in the application inventory and signed package. Installation
+copies that trusted package asset into host LocalState. Before `clawctl pwsh`
+starts, the launcher refreshes an installed cache from the current package,
+then projects it through a generation-checked `SessionWorkspaceOperation`,
+which rejects guest-controlled path redirection. The workspace copy is
+disposable and is removed rather than loaded when the authoritative host cache
+is absent.
+
 ```mermaid
 flowchart LR
     openclaw["openclaw alias"] --> host["openclaw.exe NativeAOT host"]

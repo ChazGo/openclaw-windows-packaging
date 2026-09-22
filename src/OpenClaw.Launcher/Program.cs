@@ -756,6 +756,47 @@ internal static class Program
                     options,
                     GetSessionRuntime(),
                     cancellationToken),
+                Completion = (completionOptions, _) =>
+                {
+                    if (completionOptions.Uninstall)
+                    {
+                        string uninstalledProfilePath = PowerShellCompletion.Uninstall(
+                            completionOptions.ProfilePath ??
+                            PowerShellCompletion.DefaultProfilePath());
+                        DeleteCompletionCache(GetSessionRuntime().Paths.CompletionCachePath);
+                        return Task.FromResult(WriteResult(new CompletionCommandResult(
+                            PowerShellCompletion.ClawCtlScript,
+                            uninstalledProfilePath,
+                            CachePath: null,
+                            ExitCode: 0)));
+                    }
+
+                    string applicationDirectory = GetPackagedApplicationDirectory(options);
+                    string openClawScript =
+                        PowerShellCompletion.ReadPackagedOpenClawScript(applicationDirectory);
+                    string combinedScript = PowerShellCompletion.BuildScript(openClawScript);
+                    if (!completionOptions.Install)
+                    {
+                        return Task.FromResult(WriteResult(new CompletionCommandResult(
+                            combinedScript,
+                            ProfilePath: null,
+                            CachePath: null,
+                            ExitCode: 0)));
+                    }
+
+                    string profilePath = completionOptions.ProfilePath ??
+                        PowerShellCompletion.DefaultProfilePath();
+                    profilePath = PowerShellCompletion.Install(profilePath);
+                    Session.SessionRuntime runtime = GetSessionRuntime();
+                    PowerShellCompletion.WriteScriptAtomically(
+                        runtime.Paths.CompletionCachePath,
+                        openClawScript);
+                    return Task.FromResult(WriteResult(new CompletionCommandResult(
+                        combinedScript,
+                        profilePath,
+                        runtime.Paths.CompletionCachePath,
+                        ExitCode: 0)));
+                },
                 GatewayStart = async (recovery, cancellationToken) =>
                 {
                     Session.SessionRuntime runtime = GetSessionRuntime();
@@ -1283,7 +1324,7 @@ internal static class Program
         CancellationToken cancellationToken)
     {
         Session.SessionRecord record = runtime.RequireSetup();
-        record = await runtime.Coordinator.StartRecordedAsync(cancellationToken)
+        record = await runtime.StartForExecutionAsync(cancellationToken)
             .ConfigureAwait(false);
         string helperPath = runtime.RequireStagedHelper(record);
         string applicationDirectory = GetPackagedApplicationDirectory(options);
@@ -1301,6 +1342,20 @@ internal static class Program
                 ?? throw new Session.SessionException(
                     "The installed agent command shim has no parent directory."),
             installedTools.ShimPath!);
+        if (File.Exists(runtime.Paths.CompletionCachePath))
+        {
+            PowerShellCompletion.SynchronizeCacheIfInstalled(
+                runtime.Paths.CompletionCachePath,
+                PowerShellCompletion.ReadPackagedOpenClawScript(applicationDirectory));
+        }
+        string? completionScriptPath;
+        using (Session.SessionWorkspaceOperation operation =
+            runtime.Executor.CreateWorkspaceOperation(record))
+        {
+            completionScriptPath = Session.SessionCompletionProjection.Project(
+                operation,
+                runtime.Paths.CompletionCachePath);
+        }
         Session.AgentShell shell = Session.AgentShellResolver.Resolve(File.Exists);
         string? nativeRootPath = runtime.GetAgentNativeRoot();
         string? nativePreloadUrl = nativeRootPath is { Length: > 0 }
@@ -1316,7 +1371,8 @@ internal static class Program
                     record.WorkspacePath!,
                     record.AgentUserName ?? "agent",
                     tools.DirectoryPath,
-                    nodeDirectory),
+                    nodeDirectory,
+                    completionScriptPath),
                 record.WorkspacePath!)
             {
                 AdditionalEnvironment = Session.SessionExecutor.MergeEnvironment(
@@ -1333,6 +1389,14 @@ internal static class Program
             $"Opening {shell.DisplayName} in the isolated session.",
             shell.DisplayName,
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void DeleteCompletionCache(string cachePath)
+    {
+        if (File.Exists(cachePath))
+        {
+            File.Delete(cachePath);
+        }
     }
 
     private static string GetPackagedApplicationDirectory(HostOptions options)

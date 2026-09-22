@@ -112,6 +112,11 @@ function New-Fixture {
         param($directory, $architecture, $text, $nodeVersion)
         New-Item -Path (Join-Path $directory 'app') -ItemType Directory -Force | Out-Null
         [IO.File]::WriteAllText((Join-Path $directory 'app\openclaw.mjs'), $text)
+        $completionDirectory = Join-Path $directory 'app\shell-completions'
+        New-Item -Path $completionDirectory -ItemType Directory -Force | Out-Null
+        [IO.File]::WriteAllText(
+            (Join-Path $completionDirectory 'openclaw.ps1'),
+            'Register-ArgumentCompleter -Native -CommandName openclaw')
         [IO.File]::WriteAllText((Join-Path $directory 'payload-metadata.json'), (@{
             architecture = $architecture
             layout = 'expanded-directory'
@@ -358,6 +363,45 @@ try {
     $i.Offline = $true
     Assert-Fails { Invoke-Fixture $i } 'unavailable|cache'
 
+    # A cache selected before completion shipped must fail without disturbing
+    # its registration or selection, then recover through an explicit refresh.
+    $upgrade = New-Fixture
+    $upgradeDeployment = Invoke-Fixture $upgrade
+    $upgradeSelectionPath = Join-Path (
+        $upgrade.Root
+    ) 'artifacts\local-package\x64\payloads\current.json'
+    $upgradeSelectionBefore = Get-Content -LiteralPath $upgradeSelectionPath -Raw
+    $upgradeSelection = $upgradeSelectionBefore | ConvertFrom-Json
+    $upgradePayload = Join-Path (
+        Split-Path $upgradeSelectionPath
+    ) $upgradeSelection.generation
+    Remove-Item -LiteralPath (
+        Join-Path $upgradePayload 'app\shell-completions\openclaw.ps1'
+    )
+    $upgradeRegistrations = $upgrade.Registrations
+
+    Assert-Fails { Invoke-Fixture $upgrade } 'missing app\\shell-completions\\openclaw.ps1'
+    Assert-True (
+        $upgrade.Registrations -eq $upgradeRegistrations -and
+        $upgrade.Installed.PackageFullName -eq $upgradeDeployment.PackageFullName
+    ) 'An incompatible cached payload changed the working registration.'
+    Assert-True (
+        (Get-Content -LiteralPath $upgradeSelectionPath -Raw) -eq
+        $upgradeSelectionBefore
+    ) 'An incompatible cached payload changed the selected generation.'
+
+    $upgrade.PayloadText = 'completion-compatible payload'
+    $upgradeRecovered = Invoke-Fixture $upgrade @{ RefreshPayload = $true }
+    $upgradeSelectionAfter = Get-Content -LiteralPath $upgradeSelectionPath -Raw
+    Assert-True (
+        $upgradeRecovered.Changed -and
+        $upgrade.Registrations -eq ($upgradeRegistrations + 1)
+    ) 'Refreshing an incompatible cached payload did not register its replacement.'
+    Assert-True (
+        $upgradeSelectionAfter -ne $upgradeSelectionBefore -and
+        -not (Test-Path -LiteralPath $upgradePayload)
+    ) 'Successful recovery did not select the replacement and retire the old payload.'
+
     # Argument guards.
     $j = New-Fixture
     $external = Join-Path $testRoot 'supplied payload with spaces'
@@ -365,6 +409,15 @@ try {
     $supplied = Invoke-Fixture $j @{ PayloadDirectory = $external }
     Assert-True ($j.Downloads -eq 0 -and $j.Queries -eq 0) 'A supplied payload still contacted GitHub.'
     Assert-True ((Get-Content (Join-Path $supplied.LayoutDirectory 'app\openclaw.mjs') -Raw) -eq 'supplied') 'A supplied payload was not used.'
+    $incomplete = New-Fixture
+    $incompletePayload = Join-Path $testRoot 'incomplete supplied payload'
+    & $incomplete.WritePayload $incompletePayload 'x64' 'incomplete' '24.20.0'
+    Remove-Item -LiteralPath (
+        Join-Path $incompletePayload 'app\shell-completions\openclaw.ps1'
+    )
+    Assert-Fails {
+        Invoke-Fixture $incomplete @{ PayloadDirectory = $incompletePayload }
+    } 'missing app\\shell-completions\\openclaw.ps1.*-PayloadRunId'
     $legacy = New-Fixture
     $legacyPayload = Join-Path $testRoot 'legacy supplied payload'
     & $legacy.WritePayload $legacyPayload 'x64' 'legacy' '24.20.0'
