@@ -317,10 +317,8 @@ public sealed class ProgramTests : IDisposable
     }
 
     /// <summary>
-    /// The host never composes the agent's <c>NODE_OPTIONS</c>. It names the
-    /// preload, and the guest appends it to whatever the agent already set, so
-    /// settings such as <c>--max-old-space-size</c> survive setup and the
-    /// host's own value never reaches the agent.
+    /// The preload travels on Node's argument vector so OpenClaw's reconstructed
+    /// agent CLI retains it without replacing the agent's <c>NODE_OPTIONS</c>.
     /// </summary>
     [Fact]
     public async Task AgentLaunchNamesTheNativeRedirectWithoutSettingNodeOptions()
@@ -379,10 +377,16 @@ public sealed class ProgramTests : IDisposable
                     : null).ConfigureAwait(true);
 
         Assert.NotNull(launched);
+        Assert.Equal("--import", launched.Arguments![0]);
         Assert.Contains(
             OpenClawRuntimeEnvironment.NativeRedirectFileName,
-            launched.NodeOptionsSuffix,
+            launched.Arguments[1],
             StringComparison.Ordinal);
+        Assert.Equal(
+            Path.Combine(applicationDirectory, "openclaw.mjs"),
+            launched.Arguments[2]);
+        Assert.Equal("doctor", launched.Arguments[3]);
+        Assert.Null(launched.NodeOptionsSuffix);
         Assert.Equal(nativeRoot, launched.NativeRootPath);
 
         // The assigned environment must not carry NODE_OPTIONS at all: it
@@ -421,7 +425,7 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task PowerShellControlCExitsSilentlyWithPortableInterruptedCode()
+    public async Task PowerShellLaunchUsesTheNativeAwareShimAndMapsControlC()
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
         HostOptions options = CreateSetupOptions(applicationDirectory);
@@ -435,6 +439,10 @@ public sealed class ProgramTests : IDisposable
             TextWriter.Null,
             installationLifecycle: lifecycle);
         Assert.Equal(0, setupExitCode);
+        string nativeRoot = Path.Combine(_testDirectory, "agent-native", "0123456789abcdef");
+        Directory.CreateDirectory(nativeRoot);
+        SetupRecord staged = runtime.SetupState.Read(runtime.ApplicationId).Record!;
+        runtime.SetupState.Write(staged with { AgentNativeRoot = nativeRoot });
         _lastSessionBackend!.ExecuteBehavior = _ =>
         {
             string requestPath = Directory.GetFiles(
@@ -451,8 +459,15 @@ public sealed class ProgramTests : IDisposable
                 }));
             return Task.FromResult(new MxcExecutionResult(0, string.Empty, string.Empty));
         };
+        SessionLaunchRequest? launched = null;
         _lastSessionBackend!.AttachedBehavior = _ =>
-            Task.FromResult(unchecked((int)0xc000013a));
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            launched = SessionLaunchProtocol.ReadRequest(File.ReadAllText(requestPath));
+            return Task.FromResult(unchecked((int)0xc000013a));
+        };
         using var output = new StringWriter();
         using var error = new StringWriter();
 
@@ -467,6 +482,25 @@ public sealed class ProgramTests : IDisposable
         Assert.Equal(130, exitCode);
         Assert.Equal(string.Empty, output.ToString());
         Assert.Equal(string.Empty, error.ToString());
+        Assert.NotNull(launched);
+        Assert.Equal(nativeRoot, launched.NativeRootPath);
+        Assert.Null(launched.NodeOptionsSuffix);
+        Assert.False(
+            launched.Environment!.ContainsKey(
+                OpenClawRuntimeEnvironment.NativeApplicationRootVariable));
+        Assert.False(
+            launched.Environment.ContainsKey(
+                OpenClawRuntimeEnvironment.NativeStagedRootVariable));
+        Assert.Equal(
+            applicationDirectory,
+            launched.Environment[AgentToolShim.NativeApplicationRootVariable]);
+        Assert.Equal(
+            nativeRoot,
+            launched.Environment[AgentToolShim.NativeStagedRootVariable]);
+        Assert.Contains(
+            OpenClawRuntimeEnvironment.NativeRedirectFileName,
+            launched.Environment[AgentToolShim.NativePreloadUrlVariable],
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2046,12 +2080,15 @@ public sealed class ProgramTests : IDisposable
         Assert.Equal(expectedExitCode, exitCode);
         Assert.NotNull(dashboardRequest);
         Assert.Equal(
-            [Path.Combine(_testDirectory, "app", "openclaw.mjs"), "dashboard", "--json"],
+            [
+                "--import",
+                new Uri(Program.ResolveNativeRedirectPreloadPath()).AbsoluteUri,
+                Path.Combine(_testDirectory, "app", "openclaw.mjs"),
+                "dashboard",
+                "--json"
+            ],
             dashboardRequest.Arguments);
-        Assert.Contains(
-            OpenClawRuntimeEnvironment.NativeRedirectFileName,
-            dashboardRequest.NodeOptionsSuffix,
-            StringComparison.Ordinal);
+        Assert.Null(dashboardRequest.NodeOptionsSuffix);
         Assert.Equal(nativeRoot, dashboardRequest.NativeRootPath);
         foreach ((string name, string value) in OpenClawRuntimeEnvironment.BuildNativeRedirect(
             Path.Combine(_testDirectory, "app"),

@@ -326,7 +326,7 @@ internal static class Program
                     applicationDirectory,
                     interactive,
                     environmentReader),
-                NodeOptionsSuffix = BuildNativeRedirectNodeOption(runtime),
+                NodeArgumentsPrefix = BuildNativeRedirectNodeArguments(runtime),
                 NativeRootPath = runtime.GetAgentNativeRoot()
             },
             CancellationToken.None).ConfigureAwait(false);
@@ -394,10 +394,11 @@ internal static class Program
     /// account owns.
     /// </summary>
     /// <remarks>
-    /// Built in one place so every launch path - foreground, gateway, and the
-    /// agent's own shell - resolves native addons the same way. The redirect's
-    /// preload is not here: it belongs in the agent's <c>NODE_OPTIONS</c>, and
-    /// this process's own <c>NODE_OPTIONS</c> is the host's, not the agent's.
+    /// Built in one place so foreground and gateway launch paths resolve native
+    /// addons the same way. The agent shell carries equivalent values through
+    /// its command shim because agent tooling may replace process environment
+    /// values before invoking <c>openclaw</c>. The redirect's preload is not
+    /// here: it belongs on the agent Node.js argument vector.
     /// </remarks>
     private static IReadOnlyDictionary<string, string> BuildRuntimeEnvironment(
         Session.SessionRuntime runtime,
@@ -420,12 +421,13 @@ internal static class Program
     }
 
     /// <summary>
-    /// The Node.js option that loads the redirect, or <see langword="null"/>
+    /// The Node.js arguments that load the redirect, or <see langword="null"/>
     /// when setup staged nothing to redirect to.
     /// </summary>
-    private static string? BuildNativeRedirectNodeOption(Session.SessionRuntime runtime) =>
+    private static IReadOnlyList<string>? BuildNativeRedirectNodeArguments(
+        Session.SessionRuntime runtime) =>
         runtime.GetAgentNativeRoot() is { Length: > 0 }
-            ? OpenClawRuntimeEnvironment.BuildNativeRedirectNodeOption(
+            ? OpenClawRuntimeEnvironment.BuildNativeRedirectNodeArguments(
                 ResolveNativeRedirectPreloadPath())
             : null;
 
@@ -691,12 +693,16 @@ internal static class Program
                             new Session.SessionCommandRequest(
                                 runtime.RequireStagedHelper(record),
                                 nodePath,
-                                [Path.Combine(applicationDirectory, "openclaw.mjs"), "dashboard", "--json"],
+                                [
+                                    .. BuildNativeRedirectNodeArguments(runtime) ?? [],
+                                    Path.Combine(applicationDirectory, "openclaw.mjs"),
+                                    "dashboard",
+                                    "--json"
+                                ],
                                 record.WorkspacePath!)
                             {
                                 PathPrefix = Path.GetDirectoryName(nodePath),
                                 AdditionalEnvironment = dashboardEnvironment,
-                                NodeOptionsSuffix = BuildNativeRedirectNodeOption(runtime),
                                 NativeRootPath = runtime.GetAgentNativeRoot()
                             },
                             "Resolving the Control UI handoff in the isolated session.",
@@ -1296,6 +1302,10 @@ internal static class Program
                     "The installed agent command shim has no parent directory."),
             installedTools.ShimPath!);
         Session.AgentShell shell = Session.AgentShellResolver.Resolve(File.Exists);
+        string? nativeRootPath = runtime.GetAgentNativeRoot();
+        string? nativePreloadUrl = nativeRootPath is { Length: > 0 }
+            ? new Uri(ResolveNativeRedirectPreloadPath()).AbsoluteUri
+            : null;
 
         return await runtime.Executor.ExecuteCommandAsync(
             record,
@@ -1310,14 +1320,15 @@ internal static class Program
                 record.WorkspacePath!)
             {
                 AdditionalEnvironment = Session.SessionExecutor.MergeEnvironment(
-                    BuildRuntimeEnvironment(
-                        runtime,
-                        applicationDirectory,
+                    OpenClawRuntimeEnvironment.Build(
                         WindowsHostConsole.Instance.IsInteractive,
                         Environment.GetEnvironmentVariable),
-                    Session.AgentToolShim.BuildEnvironment(agentNodePath, applicationDirectory)),
-                NodeOptionsSuffix = BuildNativeRedirectNodeOption(runtime),
-                NativeRootPath = runtime.GetAgentNativeRoot()
+                    Session.AgentToolShim.BuildEnvironment(
+                        agentNodePath,
+                        applicationDirectory,
+                        nativeRootPath,
+                        nativePreloadUrl)),
+                NativeRootPath = nativeRootPath
             },
             $"Opening {shell.DisplayName} in the isolated session.",
             shell.DisplayName,
