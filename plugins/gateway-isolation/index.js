@@ -21,8 +21,14 @@ const COMMAND_GROUPS = [
       {
         id: "gateway-restart",
         title: "Restart Gateway",
-        description: "Stop, then start the gateway, keeping the session and its data. Requires PowerShell 7 on the Gateway host.",
-        command: "clawctl gateway-service stop && clawctl gateway-service start",
+        description: "Restart the gateway, keeping the session and its data. Starts it if no gateway is running.",
+        command: "clawctl gateway-service restart",
+      },
+      {
+        id: "dashboard",
+        title: "Open dashboard",
+        description: "Open the dashboard in your default browser. Requires completed setup and a running gateway. Does not print authenticated URLs or tokens.",
+        command: "clawctl open",
       },
       {
         id: "launcher-help",
@@ -42,12 +48,6 @@ const COMMAND_GROUPS = [
         title: "Gateway chat TUI",
         description: "Chat in the terminal.",
         command: "openclaw tui",
-      },
-      {
-        id: "dashboard",
-        title: "Dashboard access",
-        description: "Show the access URL for this dashboard.",
-        command: "openclaw dashboard --no-open",
       },
       {
         id: "openclaw-help",
