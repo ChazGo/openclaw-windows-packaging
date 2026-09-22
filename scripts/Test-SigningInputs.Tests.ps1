@@ -8,6 +8,7 @@ $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $policyPath = Join-Path $repositoryRoot 'release-policy.json'
 $policy = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json
 $approvedCommit = [string]$policy.approvedCommit
+$unapprovedCommit = 'b' * 40
 $releaseIdentity = & (
     Join-Path $PSScriptRoot 'Get-MSIXReleaseIdentity.ps1'
 ) `
@@ -421,14 +422,16 @@ function Update-TestMsix {
 }
 
 function Reset-TestArtifacts {
+    param([string]$PayloadCommit = $approvedCommit)
+
     Remove-Item `
         -LiteralPath $testRoot `
         -Recurse `
         -Force `
         -ErrorAction SilentlyContinue
     New-Item -Path $testRoot -ItemType Directory | Out-Null
-    New-TestArtifact -Root $testRoot -Architecture x64
-    New-TestArtifact -Root $testRoot -Architecture arm64
+    New-TestArtifact -Root $testRoot -Architecture x64 -PayloadCommit $PayloadCommit
+    New-TestArtifact -Root $testRoot -Architecture arm64 -PayloadCommit $PayloadCommit
 }
 
 try {
@@ -457,6 +460,19 @@ try {
         -Action {
             Invoke-PolicyValidation -Root $testRoot -PreserveBundle
         }
+
+    Reset-TestArtifacts
+    Assert-Fails `
+        -MessagePattern 'approved immutable OpenClaw commit' `
+        -Action {
+            Invoke-PolicyValidation `
+                -Root $testRoot `
+                -RequestedRef $unapprovedCommit
+        }
+    Reset-TestArtifacts -PayloadCommit $unapprovedCommit
+    Assert-Fails `
+        -MessagePattern 'MSIX metadata is not eligible for signing' `
+        -Action { Invoke-PolicyValidation -Root $testRoot }
 
     Reset-TestArtifacts
     Update-TestMsix -Root $testRoot -Architecture x64 -Mutator {
