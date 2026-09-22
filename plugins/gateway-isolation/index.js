@@ -7,12 +7,6 @@ const COMMAND_GROUPS = [
     title: "ClawCtl",
     commands: [
       {
-        id: "agent-shell",
-        title: "Agent session PowerShell",
-        description: "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
-        command: "clawctl pwsh",
-      },
-      {
         id: "gateway-status",
         title: "Gateway status",
         description: "Show whether the gateway is running.",
@@ -29,6 +23,12 @@ const COMMAND_GROUPS = [
         title: "Open dashboard",
         description: "Open the dashboard in your default browser. Requires completed setup and a running gateway. Does not print authenticated URLs or tokens.",
         command: "clawctl open",
+      },
+      {
+        id: "agent-shell",
+        title: "Agent session PowerShell",
+        description: "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
+        command: "clawctl pwsh",
       },
       {
         id: "launcher-help",

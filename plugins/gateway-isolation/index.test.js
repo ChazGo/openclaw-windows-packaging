@@ -159,10 +159,10 @@ test("renders one informational Gateway Isolation row with a single active badge
 });
 
 const expectedCommands = [
-  ["Agent session PowerShell", "clawctl pwsh"],
   ["Gateway status", "clawctl gateway-service status"],
   ["Restart Gateway", "clawctl gateway-service restart"],
   ["Open dashboard", "clawctl open"],
+  ["Agent session PowerShell", "clawctl pwsh"],
   ["Launcher help", "clawctl --help"],
   ["Gateway chat TUI", "openclaw tui"],
   ["OpenClaw help", "openclaw --help"],
@@ -195,10 +195,10 @@ test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw seco
   assert.deepEqual(
     [...html.matchAll(/<p class="command-description">([^<]+)<\/p>/g)].map(match => match[1]),
     [
-      "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
       "Show whether the gateway is running.",
       "Restart the gateway, keeping the session and its data. Starts it if no gateway is running.",
       "Open the dashboard in your default browser. Requires completed setup and a running gateway. Does not print authenticated URLs or tokens.",
+      "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
       "List launcher commands.",
       "Chat in the terminal.",
       "List OpenClaw commands.",
@@ -294,7 +294,7 @@ for (const legacy of [false, "throw"]) {
   for (const modern of ["missing", "reject"]) {
     test(`offers selected manual copy when legacy=${legacy} and modern=${modern}`, async () => {
       const copy = runCopyScript({ legacy, modern });
-      for (const index of [0, 2, 3, 0]) {
+      for (const index of [3, 1, 2, 3]) {
         await copy.buttons[index].click();
         assert.equal(copy.feedback.textContent, `Copy unavailable. ${expectedCommands[index][0]} command selected; press Ctrl+C to copy.`);
         assert.equal(copy.selected.textContent, expectedCommands[index][1]);
@@ -306,14 +306,14 @@ for (const legacy of [false, "throw"]) {
 
 test("reports inability to select or copy without claiming manual selection succeeded", async () => {
   const copy = runCopyScript({ selectionAvailable: false });
-  await copy.buttons[0].click();
+  await copy.buttons[3].click();
   assert.equal(copy.feedback.textContent, "Could not copy Agent session PowerShell command. Select the command and copy it manually.");
   assert.equal(copy.selected, undefined);
 });
 
 test("can use Clipboard API without DOM selection support", async () => {
   const copy = runCopyScript({ selectionAvailable: false, modern: "success" });
-  await copy.buttons[0].click();
+  await copy.buttons[3].click();
   assert.equal(copy.feedback.textContent, "Copied Agent session PowerShell command.");
   assert.deepEqual(copy.calls, [["modern", "clawctl pwsh"]]);
 });

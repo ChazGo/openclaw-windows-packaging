@@ -416,8 +416,8 @@ The active page's **Command reference** section provides a brief, copy-only
 cheat sheet grouped under **ClawCtl** and **OpenClaw**. Enter these commands
 in your normal Windows terminal (user session):
 
-- **ClawCtl:** `clawctl pwsh` first, then `clawctl gateway-service status`,
-  `clawctl gateway-service restart`, `clawctl open`, and
+- **ClawCtl:** `clawctl gateway-service status`, `clawctl gateway-service restart`,
+  `clawctl open`, `clawctl pwsh`, and
   `clawctl --help`. PowerShell opens inside the isolated agent, where `openclaw`
   and `node` are available; ClawCtl manages the session from outside it.
   Restart preserves the session and its data and starts the Gateway if it is
