@@ -159,12 +159,12 @@ test("renders one informational Gateway Isolation row with a single active badge
 });
 
 const expectedCommands = [
-  ["Agent session PowerShell", "clawctl pwsh"],
   ["Gateway status", "clawctl gateway-service status"],
-  ["Restart Gateway", "clawctl gateway-service stop && clawctl gateway-service start"],
+  ["Restart Gateway", "clawctl gateway-service restart"],
+  ["Open dashboard", "clawctl open"],
+  ["Agent session PowerShell", "clawctl pwsh"],
   ["Launcher help", "clawctl --help"],
   ["Gateway chat TUI", "openclaw tui"],
-  ["Dashboard access", "openclaw dashboard --no-open"],
   ["OpenClaw help", "openclaw --help"],
 ];
 
@@ -176,9 +176,9 @@ test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw seco
       [1, "Windows Launcher"],
       [2, "Command reference"],
       [3, "ClawCtl"],
-      ...expectedCommands.slice(0, 4).map(([title]) => [4, title]),
+      ...expectedCommands.slice(0, 5).map(([title]) => [4, title]),
       [3, "OpenClaw"],
-      ...expectedCommands.slice(4).map(([title]) => [4, title]),
+      ...expectedCommands.slice(5).map(([title]) => [4, title]),
     ],
   );
   const groups = [...html.matchAll(/<section aria-labelledby="([^"]+)">([\s\S]*?)<\/section>/g)];
@@ -186,7 +186,7 @@ test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw seco
   assert.match(groups[0][2], /<h3 id="clawctl-title" class="command-group-title">ClawCtl<\/h3>/);
   assert.match(html, /<h2 class="command-reference-title">Command reference<\/h2>\s*<p class="intro">Run these commands in your normal Windows terminal \(user session\)\.<\/p>\s*<section aria-labelledby="clawctl-title">/);
   assert.match(groups[1][2], /<h3 id="openclaw-title" class="command-group-title">OpenClaw<\/h3>\s*<p class="intro">The packaged openclaw command forwards to your agent session\. Inside clawctl pwsh, it runs directly\.<\/p>/);
-  for (const [index, expected] of [expectedCommands.slice(0, 4), expectedCommands.slice(4)].entries()) {
+  for (const [index, expected] of [expectedCommands.slice(0, 5), expectedCommands.slice(5)].entries()) {
     assert.deepEqual(
       [...groups[index][2].matchAll(/<h4>([^<]+)<\/h4>/g)].map(match => match[1]),
       expected.map(([title]) => title),
@@ -195,12 +195,12 @@ test("groups the brief cheat sheet with ClawCtl first and packaged OpenClaw seco
   assert.deepEqual(
     [...html.matchAll(/<p class="command-description">([^<]+)<\/p>/g)].map(match => match[1]),
     [
-      "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
       "Show whether the gateway is running.",
-      "Stop, then start the gateway, keeping the session and its data. Requires PowerShell 7 on the Gateway host.",
+      "Restart the gateway, keeping the session and its data. Starts it if no gateway is running.",
+      "Open the dashboard in your default browser. Requires completed setup and a running gateway. Does not print authenticated URLs or tokens.",
+      "Open PowerShell inside the isolated agent. openclaw and node are available there; clawctl manages the session from outside it.",
       "List launcher commands.",
       "Chat in the terminal.",
-      "Show the access URL for this dashboard.",
       "List OpenClaw commands.",
     ],
   );
@@ -218,7 +218,7 @@ test("offers only supported general commands with individually named copy contro
   assert.equal([...html.matchAll(/id="copy-status"/g)].length, 1);
   assert.match(html, /button:focus-visible/);
   assert.match(html, /@media \(max-width: 620px\)/);
-  assert.doesNotMatch(html, /clawctl tui|clawctl tty|clawctl dashboard|gateway-service restart|help --all|--help --all/);
+  assert.doesNotMatch(html, /clawctl tui|clawctl tty|clawctl dashboard|gateway-service stop|openclaw dashboard|--no-open|--no-browser|help --all|--help --all/);
 });
 
 function runCopyScript({ legacy = true, selectionAvailable = true, modern = "missing" } = {}) {
@@ -284,15 +284,17 @@ test("copies every exact command synchronously and announces only successful cop
 for (const legacy of [false, "throw"]) {
   test(`uses Clipboard API when legacy copy returns ${legacy}`, async () => {
     const copy = runCopyScript({ legacy, modern: "success" });
-    const restartIndex = expectedCommands.findIndex(([title]) => title === "Restart Gateway");
-    await copy.buttons[restartIndex].click();
-    assert.equal(copy.feedback.textContent, "Copied Restart Gateway command.");
-    assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[restartIndex][1]]);
+    for (const title of ["Restart Gateway", "Open dashboard"]) {
+      const index = expectedCommands.findIndex(([commandTitle]) => commandTitle === title);
+      await copy.buttons[index].click();
+      assert.equal(copy.feedback.textContent, `Copied ${title} command.`);
+      assert.deepEqual(copy.calls.at(-1), ["modern", expectedCommands[index][1]]);
+    }
   });
   for (const modern of ["missing", "reject"]) {
     test(`offers selected manual copy when legacy=${legacy} and modern=${modern}`, async () => {
       const copy = runCopyScript({ legacy, modern });
-      for (const index of [0, 2, 0]) {
+      for (const index of [3, 1, 2, 3]) {
         await copy.buttons[index].click();
         assert.equal(copy.feedback.textContent, `Copy unavailable. ${expectedCommands[index][0]} command selected; press Ctrl+C to copy.`);
         assert.equal(copy.selected.textContent, expectedCommands[index][1]);
@@ -304,14 +306,14 @@ for (const legacy of [false, "throw"]) {
 
 test("reports inability to select or copy without claiming manual selection succeeded", async () => {
   const copy = runCopyScript({ selectionAvailable: false });
-  await copy.buttons[0].click();
+  await copy.buttons[3].click();
   assert.equal(copy.feedback.textContent, "Could not copy Agent session PowerShell command. Select the command and copy it manually.");
   assert.equal(copy.selected, undefined);
 });
 
 test("can use Clipboard API without DOM selection support", async () => {
   const copy = runCopyScript({ selectionAvailable: false, modern: "success" });
-  await copy.buttons[0].click();
+  await copy.buttons[3].click();
   assert.equal(copy.feedback.textContent, "Copied Agent session PowerShell command.");
   assert.deepEqual(copy.calls, [["modern", "clawctl pwsh"]]);
 });
