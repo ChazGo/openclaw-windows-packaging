@@ -52,9 +52,7 @@ internal sealed class SessionProcessLauncher : ISessionProcessLauncher
         {
             FileName = request.Executable!,
 
-            // No shell, and no stream redirection: the isolated session's
-            // console handles are inherited so interactive and piped OpenClaw
-            // behave as they do on the host.
+            // No shell: the isolated session's console handles are inherited.
             UseShellExecute = false,
             WorkingDirectory = workingDirectory
         };
@@ -79,22 +77,28 @@ internal sealed class SessionProcessLauncher : ISessionProcessLauncher
         using FileStream? lease =
             SessionNativeStager.OpenConsumerLease(request.NativeRootPath);
 
-        using Process process = new() { StartInfo = startInfo };
+        Process? process = null;
         try
         {
-            process.Start();
+            process = Process.Start(startInfo) ??
+                throw new SessionLaunchException(
+                    $"Unable to start '{request.Executable}'.");
+            process.WaitForExit();
+            return process.ExitCode;
         }
         catch (Exception exception) when (
             exception is System.ComponentModel.Win32Exception or
             InvalidOperationException or
-            PlatformNotSupportedException)
+            PlatformNotSupportedException or
+            IOException)
         {
             throw new SessionLaunchException(
                 $"Unable to start '{request.Executable}': {exception.Message}");
         }
-
-        process.WaitForExit();
-        return process.ExitCode;
+        finally
+        {
+            process?.Dispose();
+        }
     }
 
     /// <summary>

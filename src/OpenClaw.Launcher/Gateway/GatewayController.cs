@@ -67,7 +67,7 @@ internal sealed class GatewayController
     /// is still coming up. Long enough for a cold Node.js start inside the
     /// sandbox, short enough that a wedged launch does not hold the terminal.
     /// </summary>
-    internal static readonly TimeSpan ListenerWaitBudget = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan ListenerWaitBudget = TimeSpan.FromSeconds(90);
 
     /// <summary>
     /// Gap between listener checks. Each check is an IPC round trip into the
@@ -177,11 +177,39 @@ internal sealed class GatewayController
     public async Task<GatewayStartResult> StartAsync(
         string helperPath,
         CancellationToken cancellationToken,
-        IProgress<GatewayStartProgress>? progress = null)
+        IProgress<GatewayStartProgress>? progress = null,
+        Action<GatewayStartResult>? onRunningUnderLock = null)
     {
         using ISessionLockHandle handle = AcquireLock();
-        return await StartUnderLockAsync(helperPath, cancellationToken, progress)
+        return await StartWithLockAlreadyHeldAsync(
+            helperPath,
+            cancellationToken,
+            progress,
+            onRunningUnderLock).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Starts without reacquiring the lifecycle lock so a caller can make a
+    /// related state decision and the launch one atomic transition.
+    /// </summary>
+    /// <remarks>The caller must hold this controller's lifecycle lock.</remarks>
+    internal async Task<GatewayStartResult> StartWithLockAlreadyHeldAsync(
+        string helperPath,
+        CancellationToken cancellationToken,
+        IProgress<GatewayStartProgress>? progress = null,
+        Action<GatewayStartResult>? onRunningUnderLock = null)
+    {
+        GatewayStartResult result = await StartUnderLockAsync(
+            helperPath,
+            cancellationToken,
+            progress)
             .ConfigureAwait(false);
+        if (result.State == GatewayState.Running || result.AlreadyRunning)
+        {
+            onRunningUnderLock?.Invoke(result);
+        }
+
+        return result;
     }
 
     private async Task<GatewayStartResult> StartUnderLockAsync(

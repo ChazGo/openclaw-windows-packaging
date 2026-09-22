@@ -1,11 +1,15 @@
 using System.CommandLine;
-using System.Text.Json;
 using System.Reflection;
+using System.Text;
+using System.Text.Json;
 
 namespace OpenClaw.Launcher.Tests;
 
 public sealed class ClawCtlCommandLineTests
 {
+    private const string OpenClawCompletionScript =
+        "Register-ArgumentCompleter -Native -CommandName openclaw -ScriptBlock {}";
+
     private static async Task<(int ExitCode, string Output, string Error)> RunAsync(
         params string[] args)
     {
@@ -99,6 +103,7 @@ public sealed class ClawCtlCommandLineTests
                 ClawCtlCommandLine.CollectLogsCommandName,
                 "teardown",
                 ClawCtlCommandLine.OpenCommandName,
+                ClawCtlCommandLine.CompletionCommandName,
                 "pwsh",
                 "gateway-service"
             ],
@@ -392,6 +397,223 @@ public sealed class ClawCtlCommandLineTests
 
         Assert.Equal(0, exitCode);
         Assert.Equal(new SetupOptions(Fresh: true, Force: true), received);
+    }
+
+    [Fact]
+    public async Task CompletionInstallDispatchesProfileOptions()
+    {
+        CompletionOptions? received = null;
+        RootCommand root = ClawCtlCommandLine.Create(new ClawCtlHandlers
+        {
+            Setup = (_, _) => Task.FromResult(0),
+            Status = _ => Task.FromResult(0),
+            CollectLogs = (_, _) => Task.FromResult(0),
+            Teardown = (_, _) => Task.FromResult(0),
+            Completion = (value, _) =>
+            {
+                received = value;
+                return Task.FromResult(0);
+            },
+            PowerShell = _ => Task.FromResult(0),
+            GatewayStart = (_, _) => Task.FromResult(0),
+            GatewayStatus = _ => Task.FromResult(0),
+            GatewayStop = _ => Task.FromResult(0),
+            GatewayRestart = _ => Task.FromResult(0)
+        });
+
+        int exitCode = await root.Parse("completion --install --profile C:\\test\\profile.ps1").InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(
+            new CompletionOptions(
+                Install: true,
+                Uninstall: false,
+                ProfilePath: @"C:\test\profile.ps1"),
+            received);
+    }
+
+    [Fact]
+    public async Task CompletionRejectsConflictingProfileOperations()
+    {
+        (int exitCode, _, string error) =
+            await RunAsync("completion", "--install", "--uninstall").ConfigureAwait(true);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("cannot be used together", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompletionProfileInstallAndUninstallPreserveOtherProfileContent()
+    {
+        string directory = TestDirectory.Create();
+        string profile = Path.Combine(directory, "profile.ps1");
+        try
+        {
+            File.WriteAllText(profile, "Set-StrictMode -Version Latest\r\n");
+
+            PowerShellCompletion.Install(profile);
+
+            string installed = File.ReadAllText(profile);
+            Assert.Contains("Set-StrictMode -Version Latest", installed, StringComparison.Ordinal);
+            Assert.Contains(PowerShellCompletion.BeginMarker, installed, StringComparison.Ordinal);
+            Assert.Contains(
+                "Get-Command clawctl -CommandType Application",
+                installed,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                "& $clawctlCommand.Source completion",
+                installed,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                OpenClawCompletionScript,
+                installed,
+                StringComparison.Ordinal);
+
+            PowerShellCompletion.Uninstall(profile);
+
+            string uninstalled = File.ReadAllText(profile);
+            Assert.Equal("Set-StrictMode -Version Latest" + Environment.NewLine, uninstalled);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CompletionProfileRelativePathIsResolved()
+    {
+        string directory = TestDirectory.Create();
+        string profile = Path.Combine(directory, "profile.ps1");
+        try
+        {
+            string installedProfile = PowerShellCompletion.Install(
+                "profile.ps1",
+                directory);
+
+            Assert.Equal(Path.GetFullPath(profile), installedProfile);
+            Assert.True(File.Exists(profile));
+
+            string uninstalledProfile = PowerShellCompletion.Uninstall(
+                "profile.ps1",
+                directory);
+
+            Assert.Equal(installedProfile, uninstalledProfile);
+            Assert.Empty(File.ReadAllText(profile));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CompletionProfileUpdatePreservesUnrelatedBytes()
+    {
+        string directory = TestDirectory.Create();
+        string profile = Path.Combine(directory, "profile.ps1");
+        byte[] original = Encoding.UTF8.GetBytes("Write-Host 'keep'  \r\n \t");
+        try
+        {
+            File.WriteAllBytes(profile, original);
+
+            PowerShellCompletion.Install(profile);
+            PowerShellCompletion.Uninstall(profile);
+
+            Assert.Equal(original, File.ReadAllBytes(profile));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CompletionProfileUninstallSeparatesSurvivingCommands()
+    {
+        string directory = TestDirectory.Create();
+        string profile = Path.Combine(directory, "profile.ps1");
+        try
+        {
+            File.WriteAllText(profile, "Write-Host 'before'");
+
+            PowerShellCompletion.Install(profile);
+            File.AppendAllText(profile, "Write-Host 'after'");
+            PowerShellCompletion.Uninstall(profile);
+
+            Assert.Equal(
+                "Write-Host 'before'\nWrite-Host 'after'",
+                File.ReadAllText(profile));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CompletionProfilePreservesUtf32Encoding(bool bigEndian)
+    {
+        string directory = TestDirectory.Create();
+        string profile = Path.Combine(directory, "profile.ps1");
+        var encoding = new UTF32Encoding(
+            bigEndian,
+            byteOrderMark: true,
+            throwOnInvalidCharacters: true);
+        byte[] original =
+        [
+            .. encoding.GetPreamble(),
+            .. encoding.GetBytes("Set-StrictMode -Version Latest\r\n")
+        ];
+        try
+        {
+            File.WriteAllBytes(profile, original);
+
+            PowerShellCompletion.Install(profile);
+
+            byte[] installed = File.ReadAllBytes(profile);
+            Assert.True(installed.AsSpan().StartsWith(encoding.GetPreamble()));
+            Assert.Contains(
+                PowerShellCompletion.BeginMarker,
+                encoding.GetString(installed, encoding.GetPreamble().Length,
+                    installed.Length - encoding.GetPreamble().Length),
+                StringComparison.Ordinal);
+
+            PowerShellCompletion.Uninstall(profile);
+
+            Assert.Equal(original, File.ReadAllBytes(profile));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CompletionCacheRefreshesOnlyWhenInstalled()
+    {
+        string directory = TestDirectory.Create();
+        string cache = Path.Combine(directory, "openclaw.ps1");
+        try
+        {
+            Assert.False(PowerShellCompletion.SynchronizeCacheIfInstalled(
+                cache,
+                OpenClawCompletionScript));
+            Assert.False(File.Exists(cache));
+
+            File.WriteAllText(cache, "stale");
+
+            Assert.True(PowerShellCompletion.SynchronizeCacheIfInstalled(
+                cache,
+                OpenClawCompletionScript));
+            Assert.Equal(OpenClawCompletionScript, File.ReadAllText(cache));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]

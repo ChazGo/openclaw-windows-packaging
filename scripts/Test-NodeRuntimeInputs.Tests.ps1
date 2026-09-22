@@ -142,6 +142,14 @@ require("node:fs").writeFileSync("installed-architecture.txt", process.arch);
     if ((Get-Content -LiteralPath "$payload\app\installed-architecture.txt" -Raw) -cne $nodeArchitecture) {
         throw 'The npm install lifecycle did not execute with the target Node.js architecture.'
     }
+    $completionPath = Join-Path $payload 'app\shell-completions\openclaw.ps1'
+    if (
+        -not (Test-Path -LiteralPath $completionPath -PathType Leaf) -or
+        (Get-Content -LiteralPath $completionPath -Raw) -notmatch
+            'Register-ArgumentCompleter.+openclaw'
+    ) {
+        throw 'The payload did not include trusted OpenClaw PowerShell completion.'
+    }
 
     $reusedPayload = Join-Path $testRoot 'payload-reused'
     & "$PSScriptRoot\Build-Payload.ps1" `
@@ -151,6 +159,15 @@ require("node:fs").writeFileSync("installed-architecture.txt", process.arch);
         -ReuseStagedInstall
     if (-not (Test-Path -LiteralPath "$reusedPayload\app\openclaw.mjs")) {
         throw 'The reused staged install did not produce an application payload.'
+    }
+    if (
+        -not (
+            Test-Path `
+                -LiteralPath "$reusedPayload\app\shell-completions\openclaw.ps1" `
+                -PathType Leaf
+        )
+    ) {
+        throw 'The reused staged install did not regenerate PowerShell completion.'
     }
 
     $packagePath = @(

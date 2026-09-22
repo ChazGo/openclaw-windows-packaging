@@ -31,6 +31,26 @@ activation, while avoiding two launchers that could drift in AOT settings,
 diagnostics, or runtime composition. It also protects transparent forwarding:
 `openclaw` arguments are OpenClaw-owned and never become `clawctl` options.
 
+## Completion stays owned by the installed runtime
+
+`clawctl completion` writes completion for both aliases to standard output.
+`clawctl completion --install` adds a marked loader to the invoking user's
+PowerShell profile. Each new shell resolves the installed `clawctl` application
+and sources its current completion output, so package updates do not require a
+profile rewrite. The profile update changes only the marked byte range and
+replaces the file atomically, so an existing profile's encoding, line endings,
+and unrelated content survive.
+
+The payload build asks the pinned OpenClaw application to generate its
+PowerShell completion script, validates the result, and includes those
+immutable bytes in the application inventory and signed package. Installation
+copies that trusted package asset into host LocalState. Before `clawctl pwsh`
+starts, the launcher refreshes an installed cache from the current package,
+then projects it through a generation-checked `SessionWorkspaceOperation`,
+which rejects guest-controlled path redirection. The workspace copy is
+disposable and is removed rather than loaded when the authoritative host cache
+is absent.
+
 ```mermaid
 flowchart LR
     openclaw["openclaw alias"] --> host["openclaw.exe NativeAOT host"]
@@ -42,12 +62,17 @@ flowchart LR
 
 ## Setup creates an explicit, isolated execution boundary
 
-An ordinary `openclaw` invocation does not provision a session or install a
-runtime. It can use only the recorded, usable isolated session created by
-explicit setup. Failing instead of provisioning during an application launch
-keeps a foreground command from unexpectedly downloading, extracting, or
-creating an agent environment, and makes setup state observable and
-recoverable.
+`clawctl setup` creates and records the isolated session. An `openclaw`
+invocation whose setup marker is absent provisions that same boundary before
+forwarding its arguments, including for `--help` and `--version`. It never runs
+OpenClaw on the host.
+
+Automatic setup is deliberately narrow. An unreadable, incomplete, foreign,
+newer-schema, preparing, or tearing-down marker, a session mismatch, and a
+stale agent Node.js runtime remain explicit recovery states with their existing
+`clawctl setup` or `clawctl teardown` guidance. Automatic setup does not repair
+degraded state. The lifecycle lock double-checks an absent marker so concurrent
+first launches provision once.
 
 [`SetupStateStore`](../src/OpenClaw.Launcher/Session/SetupStateStore.cs)
 persists the setup phase and its durable outcome. [`SessionRuntime`](../src/OpenClaw.Launcher/Session/SessionRuntime.cs)
@@ -201,14 +226,16 @@ flowchart LR
 
 1. Windows activates an alias; the one NativeAOT host identifies the agent or
    control application identity.
-2. `clawctl setup` explicitly creates or repairs the isolated session,
-   stages the helper, and installs the agent-owned Node runtime.
-3. `openclaw` loads the recorded session and sends a JSON launch request to
-   the staged helper through the MXC adapter; it never provisions implicitly.
-4. The helper replays the argument vector inside the agent session with the
-   agent runtime first on that child process's path.
-5. If configured, `gateway-service` records its launch configuration and the
-   logon task restarts the gateway through the same session boundary.
+2. `clawctl setup` explicitly creates or repairs the isolated session, stages
+   the helper, and installs the agent-owned Node runtime. When the setup marker
+   is absent, `openclaw` performs that provisioning first.
+3. For every other marker state, `openclaw` preserves the explicit recovery
+   result rather than repairing it automatically.
+4. `openclaw` loads the recorded session and sends a JSON launch request to
+   the staged helper through the MXC adapter.
+5. The helper replays the argument vector inside the agent session with the
+   agent runtime first on that child process's path. If eligible, a successful
+   interactive launch starts the managed gateway through this same boundary.
 
 ## Source map
 

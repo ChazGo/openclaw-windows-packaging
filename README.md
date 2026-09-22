@@ -32,10 +32,11 @@ packages.
 
 - Windows 11 on a build that supports isolated agent sessions, on x64 or ARM64.
   OpenClaw always runs inside an isolated session, so a machine that cannot host
-  one is not supported: `clawctl setup` and `openclaw` both fail with a message
-  naming this requirement and the diagnostic log path. Install the latest
-  Windows updates (Settings > Windows Update), or install a newer Windows
-  version, and run `clawctl setup` again.
+  one is not supported: both `clawctl setup` and `openclaw` fail with a message
+  naming this requirement and the diagnostic log path. `openclaw` first
+  attempts automatic setup. Install the latest Windows updates (Settings >
+  Windows Update), or install a newer Windows version, and run `clawctl setup`
+  again.
 - Developer Mode is required only for the local loose-layout development loop,
   not for the signed MSIX.
 
@@ -53,13 +54,17 @@ own package-management commands. Every argument, including an empty argument
 list, is forwarded unchanged to `node openclaw.mjs`, and the launcher returns
 the exact child exit code.
 
-`openclaw` runs only inside the isolated agent session recorded by
-`clawctl setup`. It does not run OpenClaw on the host, and it fails rather than
-falling back when the recorded session is missing, owned by another
-installation, or unavailable.
+`openclaw` runs only inside an isolated agent session. When the setup marker is
+absent, it provisions the installation before forwarding its arguments, so a
+clean machine can start with `openclaw`, including `openclaw --help` and
+`openclaw --version`. It does not run OpenClaw on the host. Unreadable,
+incomplete, foreign, newer-schema, preparing, or tearing-down setup markers,
+session mismatches, and stale agent Node.js runtimes remain explicit recovery
+states with their `clawctl setup` or `clawctl teardown` guidance; automatic
+setup never repairs them.
 
 Before launching, the host resolves the bundled Node.js executable previously
-prepared by `clawctl setup` and checks its PE product version and executable
+prepared during setup and checks its PE product version and executable
 architecture against the packaged archive without a separate Node.js process.
 The runtime directory is prepended
 to the child's `PATH` so Node.js, npm, and npx subprocesses use the bundled
@@ -88,22 +93,39 @@ the read-only application directory the workspace.
 
 After each successful interactive `openclaw` invocation, the launcher performs
 a file-only readiness check inside the isolated session. If the default
-`.openclaw\openclaw.json` has `gateway.mode` set to `local` but the managed
-gateway has never started or has stopped, it suggests
-`clawctl gateway-service start` on standard error. It does not suggest a second
-start when gateway status is starting, unhealthy, or unknown. The check stops
-for the current Windows logon after that start command is invoked or a running
-gateway is observed; a new Windows logon enables it again. On an interactive
-terminal the hint uses the crab identity and the same warning/accent palette as
-`clawctl`; redirected and explicitly color-disabled output remains plain.
+`.openclaw\openclaw.json` has `gateway.mode` set to `local` and the managed
+gateway is `NotStarted` or `Stopped`, it starts the gateway when readiness is
+`startup eligible`, narrating progress on standard error. It does nothing for
+a non-zero OpenClaw exit code, redirected output, non-eligible readiness, or a
+`Starting`, `Unhealthy`, or `Unknown` gateway. An observed `Running` gateway is
+acknowledged. A failed or unverified start writes a standard-error warning and
+a retry command, `clawctl gateway-service start`, without changing the
+OpenClaw exit code; the next eligible run retries. A successful start is
+acknowledged for the current Windows logon. See [environment
+variables](#environment-variables) to restore the prior start hint.
+
+### Environment variables
+
+These host-side variables are not passed to the OpenClaw child. Automatic
+behavior is enabled by default. Set either variable to `0`, `false`, `no`, or
+`off` (case-insensitive and with surrounding whitespace ignored) to suppress
+its automatic behavior; any other value, including an unset variable, leaves
+it enabled.
+
+| Variable | Suppressed behavior |
+| --- | --- |
+| `CLAWCTL_AUTO_SETUP` | Restores the previous clean-machine failure: `openclaw` reports that it has not been set up and directs you to `clawctl setup`; it provisions, records, and registers nothing. |
+| `CLAWCTL_AUTO_GATEWAY_START` | Restores the previous `clawctl gateway-service start` hint instead of automatically starting an eligible gateway. |
 
 ### `clawctl`
 
-`clawctl` owns setup and the isolated-session operations:
+`clawctl` owns explicit setup, recovery, and the isolated-session operations:
 
 | Command | Behavior |
 |---|---|
 | `clawctl setup` | Confirm packaged `app\openclaw.mjs` exists, provision or reuse the owned isolated session, and install the bundled Node.js runtime in the agent profile. It also configures gateway sign-in recovery without starting a gateway. On a machine that cannot host a session it fails with the Windows requirement described under [Requirements](#requirements). |
+| `clawctl completion` | Write PowerShell completion for both `clawctl` and `openclaw` to standard output. Source it for the current shell, or use `--install` to add a marked block to the current-user PowerShell profile. |
+| `clawctl completion --install [--profile <path>]` | Atomically update the selected profile (or the current-user PowerShell profile) with a marked loader that sources completion from the currently installed `clawctl` package whenever a new shell starts. Package updates therefore take effect without rewriting the profile. The trusted upstream script is also cached in host LocalState, and `clawctl pwsh` safely projects it into the current isolated workspace. `--uninstall` removes the marked profile block and invalidates the host cache so later agent shells do not load a stale projection. |
 | `clawctl setup --fresh [--force]` | Remove this installation's owned session and package-local state, then run setup again. Without `--force`, incomplete external cleanup stops before local state is erased. `--force` is valid only with `--fresh`; it preserves an explicit warning when cleanup of owned external resources cannot be confirmed, but still stops if bounded local deletion fails. |
 | `clawctl status` | Report the recorded isolated session, agent account and shared folder, installed Node.js runtime, gateway, sign-in recovery, and file-only config readiness when the gateway is not running. It asks the backend to start the recorded provision as its status probe, so it is not a passive diagnostic, but it does not provision a replacement or start the gateway. Use `clawctl gateway-service status` to inspect the gateway alone. |
 | `clawctl open` | Open the running managed gateway's Control UI in the default browser. Requires completed `clawctl setup` and an already-running gateway; it probes those prerequisites and fails rather than starting the gateway. Packaged OpenClaw resolves the endpoint, TLS, Control UI base path, and authenticated one-time browser handoff. Authenticated URLs and tokens are not printed. |
@@ -258,10 +280,11 @@ an upgrade once nothing is still running from it; a launch holds its root for
 its whole lifetime, and a root that is still held is left whole for a later
 setup.
 
-Run setup before using `openclaw`, `clawctl pwsh`, or gateway-service start.
-There is no session-free mode: `openclaw` runs inside the session recorded by
-setup, and both entry points fail with the same message on a machine that
-cannot host one. See
+Run `clawctl setup` before using `clawctl pwsh` or gateway-service start.
+`openclaw` provisions a clean installation automatically, but there is no
+session-free mode: it runs only inside the recorded session and leaves degraded
+setup state to explicit recovery. Both setup paths fail with the same message
+on a machine that cannot host a session. See
 [MXC compatibility evidence](docs/mxc-compatibility-evidence.md) for the
 session model, gateway health criteria, and diagnostics limits.
 
@@ -270,16 +293,19 @@ The launcher places Node.js in a Windows job configured with
 runs; if the launcher exits or is terminated, Windows terminates Node.js and
 its child processes when the job handle closes.
 
-Prepare the bundled runtime once, then use `openclaw`:
+On a clean installation, start directly with `openclaw`:
 
 ```powershell
-clawctl setup
 openclaw
 ```
 
+Run `clawctl setup` first when you want the explicit setup, recovery, or
+`--fresh` path.
+
 When an MSIX update changes the bundled Node.js version, run `clawctl setup`
-again before launching OpenClaw. Previously extracted versions are left in
-place so an update does not remove a running process's runtime.
+before launching OpenClaw. Automatic setup does not repair a stale agent Node.js
+runtime after an update. Previously extracted versions are left in place so an
+update does not remove a running process's runtime.
 
 ## Selecting the OpenClaw revision
 

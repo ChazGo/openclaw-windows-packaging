@@ -14,6 +14,9 @@ fs.writeFileSync(path.join(process.env.XDG_CACHE_HOME, "fixture-cache"), "owned"
 
 if (args[0] === "--version") {
   console.log(JSON.parse(fs.readFileSync("package.json", "utf8")).version);
+} else if (args[0] === "completion") {
+  assert.deepEqual(args, ["completion", "--shell", "powershell"]);
+  console.log("Register-ArgumentCompleter -Native -CommandName openclaw -ScriptBlock {}");
 } else {
   assert.deepEqual(args, [
     "plugins", "inspect", "gateway-isolation", "--runtime", "--json",

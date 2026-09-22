@@ -59,6 +59,23 @@ public sealed class ClawCtlConsoleTests
     }
 
     [Fact]
+    public void CompletionScriptIsTheExactStandardOutput()
+    {
+        const string script = "# completion\nRegister-ArgumentCompleter\n";
+        using var output = new StringWriter();
+
+        ClawCtlConsole.WriteResult(
+            output,
+            new CompletionCommandResult(
+                script,
+                ProfilePath: null,
+                CachePath: null,
+                ExitCode: 0));
+
+        Assert.Equal(script, output.ToString());
+    }
+
+    [Fact]
     public void WriteSetupResultShowsReadyStateAndNextAction()
     {
         using var output = new StringWriter();
@@ -211,6 +228,36 @@ public sealed class ClawCtlConsoleTests
                 console,
                 new ClawCtlProgress(" "),
                 _ => Task.FromResult(0)));
+    }
+
+    [Fact]
+    public async Task GatewayNarrationUsesKnownInteractiveProcessOutput()
+    {
+        using var output = new StringWriter();
+
+        GatewayStartResult result = await ClawCtlConsole.NarrateGatewayStartAsync(
+            output,
+            useColor: false,
+            narrate: true,
+            outputIsInteractive: true,
+            progress =>
+            {
+                progress.Report(new GatewayStartProgress(
+                    GatewayStartStage.Launching,
+                    "Launching the gateway."));
+                return Task.FromResult(new GatewayStartResult(
+                    GatewayState.Running,
+                    new GatewayRecord(),
+                    AlreadyRunning: false,
+                    "The gateway is running."));
+            });
+
+        Assert.Equal(GatewayState.Running, result.State);
+        Assert.Contains("Launching the gateway.", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            $"  {GatewayStartProgress.Initial.Message}{Environment.NewLine}",
+            output.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]

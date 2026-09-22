@@ -89,7 +89,7 @@ public sealed class ProgramTests : IDisposable
     }
 
     [Fact]
-    public async Task SuccessfulInteractiveAgentHintsWhenEligibleGatewayWasNeverStarted()
+    public async Task SuccessfulInteractiveAgentStartsAnEligibleGatewayThatWasNeverStarted()
     {
         string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
         HostOptions setupOptions = CreateSetupOptions(applicationDirectory);
@@ -122,14 +122,22 @@ public sealed class ProgramTests : IDisposable
         };
         _lastSessionBackend.ExecuteBehavior = _ =>
         {
-            string requestPath = Directory.GetFiles(
+            string[] readinessRequests = Directory.GetFiles(
                 _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
-                "config-readiness-*.json").Single();
+                "config-readiness-*.json");
+            if (readinessRequests.Length == 0)
+            {
+                // Everything after readiness is the gateway launch. Failing it
+                // here proves the launcher tried to start the gateway and that
+                // the failure cannot reach the user's exit code.
+                return Task.FromResult(new MxcExecutionResult(1, string.Empty, "launch refused"));
+            }
+
             SessionConfigReadinessRequest request =
                 SessionConfigReadinessProtocol.ReadRequest(
-                    File.ReadAllText(requestPath));
+                    File.ReadAllText(readinessRequests.Single()));
             File.WriteAllText(
-                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.ResultPathFor(readinessRequests.Single()),
                 SessionConfigReadinessProtocol.SerializeResult(
                     new SessionConfigReadinessResult
                     {
@@ -158,7 +166,90 @@ public sealed class ProgramTests : IDisposable
             errorIsInteractive: () => false,
             supportsUnicode: () => true);
 
+        // The launcher now finishes the job instead of telling the user to run
+        // the start command themselves.
+        Assert.NotNull(runtime.GatewayState.Read().Record);
+        Assert.DoesNotContain(
+            AgentGatewayGuidance.Hint,
+            error.ToString(),
+            StringComparison.Ordinal);
+
+        // A postflight convenience must never turn a successful OpenClaw
+        // command into a failure.
         Assert.Equal(0, exitCode);
+        // The actionable command must survive on one line: a wrapped command is
+        // not copyable from a narrow terminal.
+        Assert.Contains(
+            "clawctl gateway-service start",
+            error.ToString(),
+            StringComparison.Ordinal);
+
+        // Leaving it unacknowledged is what makes a later run retry.
+        Assert.False(
+            new GatewayGuidanceStateStore(runtime.Paths.GatewayGuidanceStatePath)
+                .IsAcknowledged("logon-a"));
+    }
+
+    [Fact]
+    public async Task SuppressedAutoStartStillRendersTheHintWithColorAndUnicode()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        HostOptions setupOptions = CreateSetupOptions(applicationDirectory);
+        SessionRuntime runtime = CreateSessionRuntime();
+        int setupExitCode = await Program.RunControlAsync(
+            setupOptions,
+            ["setup"],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            installationLifecycle: new FailingFreshLifecycle(runtime) { TeardownSucceeds = true });
+        Assert.Equal(0, setupExitCode);
+
+        _lastSessionBackend!.AttachedBehavior = _ =>
+        {
+            string requestPath = Directory.GetFiles(
+                _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+                "launch-*.json").Single();
+            SessionLaunchRequest request = SessionLaunchProtocol.ReadRequest(
+                File.ReadAllText(requestPath));
+            File.WriteAllText(
+                SessionLaunchProtocol.ResultPathFor(requestPath),
+                SessionLaunchProtocol.SerializeResult(new SessionLaunchResult
+                {
+                    RequestId = request.RequestId,
+                    Launched = true,
+                    ExitCode = 0,
+                }));
+            return Task.FromResult(0);
+        };
+        ConfigureConfigReadiness(
+            _lastSessionBackend,
+            SessionConfigReadinessState.StartupEligible,
+            SessionConfigReadinessReason.GatewayModeLocal);
+        var error = new StringWriter();
+
+        int exitCode = await Program.RunAgentAsync(
+            new HostOptions(
+                applicationDirectory,
+                setupOptions.PackagedNodeArchivePath,
+                ["status"]),
+            _ => { },
+            _ => runtime,
+            probeReadiness: SupportedHost,
+            getPackageFamilyName: () => runtime.Paths.PackageFamilyName,
+            readEnvironmentVariable: name =>
+                name == OpenClawRuntimeEnvironment.AutoGatewayStartVariable ? "0" : null,
+            isInteractive: () => true,
+            error: error,
+            getLogonSessionId: () => "logon-a",
+            errorIsProcessConsoleWriter: () => true,
+            errorIsInteractive: () => false,
+            supportsUnicode: () => true);
+
+        Assert.Equal(0, exitCode);
+        // Opting out restores the previous experience exactly, including the
+        // crab identity and the accent palette on an ANSI-capable stderr.
+        Assert.Null(runtime.GatewayState.Read().Record);
         Assert.Contains("\u001b[", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("\U0001f980", error.ToString(), StringComparison.Ordinal);
         Assert.Contains(
@@ -2326,6 +2417,81 @@ public sealed class ProgramTests : IDisposable
             runtime.GatewayState,
             new GatewayConfigurationStore(Path.Combine(stateRoot, "gateway-config.json")),
             runtime.SetupState);
+    }
+
+    [Fact]
+    public async Task CompletionPrintsBothScriptsWithoutStartingTheSession()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        string completionDirectory = Path.Combine(
+            applicationDirectory,
+            "shell-completions");
+        Directory.CreateDirectory(completionDirectory);
+        const string openClawScript =
+            "Register-ArgumentCompleter -Native -CommandName openclaw -ScriptBlock {}";
+        await File.WriteAllTextAsync(
+            Path.Combine(completionDirectory, "openclaw.ps1"),
+            openClawScript).ConfigureAwait(true);
+        using var output = new StringWriter();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(applicationDirectory, null, []),
+            ["completion"],
+            _ => { },
+            output,
+            TextWriter.Null,
+            new FailIfWorkStartsLifecycle()).ConfigureAwait(true);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(
+            "Register-ArgumentCompleter -Native -CommandName clawctl",
+            output.ToString(),
+            StringComparison.Ordinal);
+        Assert.Contains(openClawScript, output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompletionInstallUsesPackagedScriptWithoutStartingTheSession()
+    {
+        string applicationDirectory = await CreateApplicationAsync().ConfigureAwait(true);
+        string completionDirectory = Path.Combine(
+            applicationDirectory,
+            "shell-completions");
+        Directory.CreateDirectory(completionDirectory);
+        const string openClawScript =
+            "Register-ArgumentCompleter -Native -CommandName openclaw -ScriptBlock {}";
+        await File.WriteAllTextAsync(
+            Path.Combine(completionDirectory, "openclaw.ps1"),
+            openClawScript).ConfigureAwait(true);
+        string profile = Path.Combine(_testDirectory, "profile.ps1");
+        SessionRuntime runtime = CreateSessionRuntime();
+
+        int exitCode = await Program.RunControlAsync(
+            new HostOptions(applicationDirectory, null, []),
+            ["completion", "--install", "--profile", profile],
+            _ => { },
+            TextWriter.Null,
+            TextWriter.Null,
+            new StubbedRecoveryLifecycle(runtime)).ConfigureAwait(true);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(_lastSessionBackend!.Calls);
+        string installedProfile = await File.ReadAllTextAsync(profile).ConfigureAwait(true);
+        Assert.Contains(
+            "Get-Command clawctl -CommandType Application",
+            installedProfile,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            openClawScript,
+            installedProfile,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            openClawScript,
+            await File.ReadAllTextAsync(runtime.Paths.CompletionCachePath)
+                .ConfigureAwait(true));
+        Assert.False(Directory.Exists(Path.Combine(
+            _lastSessionBackend.Metadata!.EphemeralWorkspacePath,
+            ".openclaw")));
     }
 
     private SessionRuntime CreateSessionRuntime()
