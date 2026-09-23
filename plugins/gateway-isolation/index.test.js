@@ -17,13 +17,17 @@ test("ships enabled by default with startup activation", () => {
   assert.equal(manifest.activation.onStartup, true);
 });
 
-function registerPlugin(mode) {
+function registerPlugin(mode, platform = "win32") {
   const descriptors = [];
   const routes = [];
+  const hooks = [];
   const plugin = createGatewayIsolationPlugin({
     CLAWCTL_GATEWAY_ISOLATION: mode,
-  });
+  }, platform);
   plugin.register({
+    on(name, handler) {
+      hooks.push({ name, handler });
+    },
     session: {
       controls: {
         registerControlUiDescriptor(descriptor) {
@@ -37,8 +41,61 @@ function registerPlugin(mode) {
   });
   assert.equal(descriptors.length, 1);
   assert.equal(routes.length, 1);
-  return { descriptors, routes };
+  return { descriptors, routes, hooks };
 }
+
+test("supplies complete local-session guidance before prompt build without reading the conversation", () => {
+  const { hooks } = registerPlugin("enabled");
+  assert.deepEqual(hooks.map(hook => hook.name), ["before_prompt_build"]);
+  const unreadable = new Proxy({}, {
+    get() { throw new Error("Static guidance must not inspect conversation data."); },
+  });
+  const result = hooks[0].handler(unreadable, unreadable);
+  assert.deepEqual(Object.keys(result), ["prependContext", "appendSystemContext"]);
+  const text = result.prependContext;
+  assert.equal(result.appendSystemContext, text);
+  for (const instruction of [
+    "separate Windows agent session",
+    "not the user's interactive desktop",
+    "Do not launch or offer to launch local GUI for user participation",
+    "even when the user asks you to open a window or sign-in dialog",
+    "give steps for the user to act on their own desktop",
+    "ask for its documentation instead of promising a local dialog",
+    "connected chat, web, TUI",
+    "supported CLI, headless, device-code, or text workflow",
+    "wait for the required response",
+    "Do not invent authentication flows",
+    "credentials/tokens",
+    "MFA/consent",
+    "Keep scratch files, dependencies, repositories, and working trees private",
+    "does not prove user access",
+    "only intended deliverables",
+    "Preserve private originals",
+    "Verify recipient-side access or delivery",
+    "Never invent a shared directory",
+    "ask for a supported destination",
+    "administrator Explorer, broad ACL changes",
+    "Remote and user-session nodes",
+    "capability, and authorization",
+    "not on every turn",
+  ]) {
+    assert.ok(text.includes(instruction), `Missing instruction: ${instruction}`);
+  }
+  assert.deepEqual(hooks[0].handler(), result);
+  result.prependContext = "caller mutation";
+  result.appendSystemContext = "caller mutation";
+  assert.equal(hooks[0].handler().prependContext, text);
+  assert.equal(hooks[0].handler().appendSystemContext, text);
+});
+
+test("does not infer local isolation from platform alone or a remote Windows node", () => {
+  for (const platform of ["win32", "linux", "darwin"]) {
+    for (const mode of ["enabled", ...invalidModes]) {
+      const { hooks } = registerPlugin(mode, platform);
+      assert.equal(hooks.length, platform === "win32" && mode === "enabled" ? 1 : 0);
+    }
+  }
+});
 
 function invokeRoute(route) {
   const result = {
@@ -455,17 +512,20 @@ for (const initial of ["enabled", ...invalidModes]) {
         reads++;
         return value;
       },
-    });
+    }, "win32");
     assert.equal(reads, 1);
     value = initial === "enabled" ? "disabled" : "enabled";
     const routes = [];
+    const hooks = [];
     plugin.register({
+      on(name, handler) { hooks.push({ name, handler }); },
       session: { controls: { registerControlUiDescriptor() {} } },
       registerHttpRoute(route) {
         routes.push(route);
       },
     });
 
+    assert.equal(hooks.length, initial === "enabled" ? 1 : 0);
     const first = invokeRoute(routes[0]);
     assert.equal(first.statusCode, initial === "enabled" ? 200 : 503);
     assert.match(first.body, initial === "enabled" ? />Active</ : />Invalid</);
@@ -473,6 +533,9 @@ for (const initial of ["enabled", ...invalidModes]) {
     assertHeaders(first);
     for (value of ["enabled", "disabled", "invalid", undefined]) {
       assert.deepEqual(invokeRoute(routes[0]), first);
+      if (hooks.length) {
+        assert.match(hooks[0].handler().prependContext, /separate Windows agent session/);
+      }
     }
     assert.equal(reads, 1);
   });

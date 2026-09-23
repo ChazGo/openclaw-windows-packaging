@@ -38,11 +38,18 @@ if (args[0] === "--version") {
   }
   const routes = [];
   const descriptors = [];
+  const hooks = [];
   if (enabled) {
     const { default: plugin } = await import(
       pathToFileURL(path.join(pluginRoot, "index.js")).href
     );
     plugin.register({
+      on(name, handler) {
+        hooks.push({ name });
+        assert.deepEqual(Object.keys(handler()), ["prependContext", "appendSystemContext"]);
+        assert.match(handler().prependContext, /separate Windows agent session/);
+        assert.equal(handler().appendSystemContext, handler().prependContext);
+      },
       session: {
         controls: {
           registerControlUiDescriptor(descriptor) { descriptors.push(descriptor); },
@@ -57,6 +64,9 @@ if (args[0] === "--version") {
     assert.equal(routes[0].auth, "gateway");
     assert.equal(routes[0].match, "exact");
     assert.equal(routes[0].path, "/plugins/gateway-isolation/status");
+    assert.deepEqual(hooks.map(hook => hook.name),
+      process.platform === "win32" && process.env.CLAWCTL_GATEWAY_ISOLATION === "enabled"
+        ? ["before_prompt_build"] : []);
   }
   console.log(JSON.stringify({
     plugin: {
@@ -69,7 +79,9 @@ if (args[0] === "--version") {
       status: enabled ? "loaded" : "disabled",
       imported: enabled,
       httpRoutes: routes.length,
+      hookCount: hooks.length,
     },
+    typedHooks: hooks,
     httpRouteCount: routes.length,
     gatewayMethods: [],
     tools: [],
