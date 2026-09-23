@@ -247,6 +247,7 @@ public sealed class ClawCtlConsoleTests
             useColor: false,
             narrate: true,
             outputIsInteractive: true,
+            useUnicode: true,
             progress =>
             {
                 progress.Report(new GatewayStartProgress(
@@ -264,6 +265,147 @@ public sealed class ClawCtlConsoleTests
         Assert.DoesNotContain(
             $"  {GatewayStartProgress.Initial.Message}{Environment.NewLine}",
             output.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GatewayNarrationPreservesUnicodeCapabilityForNonConsoleOutput()
+    {
+        string[] unicodeFrames =
+        [
+            .. ClawCtlSpinner.Scuttle.Frames,
+            .. ClawCtlSpinner.Bubbles.Frames,
+            .. ClawCtlSpinner.TidePulse.Frames,
+        ];
+        using var output = new SpinnerObservingTextWriter(
+        [
+            .. unicodeFrames,
+            .. ClawCtlSpinner.Ascii.Frames,
+        ]);
+
+        _ = await ClawCtlConsole.NarrateGatewayStartAsync(
+            output,
+            useColor: true,
+            narrate: true,
+            outputIsInteractive: true,
+            useUnicode: true,
+            async progress =>
+            {
+                progress.Report(new GatewayStartProgress(
+                    GatewayStartStage.Launching,
+                    "Launching the gateway."));
+                await output.SpinnerFrameObserved.ConfigureAwait(false);
+                return new GatewayStartResult(
+                    GatewayState.Running,
+                    new GatewayRecord(),
+                    AlreadyRunning: false,
+                    "The gateway is running.");
+            });
+
+        string rendered = output.GetText();
+        Assert.Contains(
+            unicodeFrames,
+            frame => rendered.Contains(frame, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(true, "\U0001f980 \u2713 Gateway: running on port 18789.")]
+    [InlineData(false, "[ok] Gateway: running on port 18789.")]
+    public void GatewayStartOutcomeReportsVerifiedSuccess(
+        bool useUnicode,
+        string expected)
+    {
+        using var output = new StringWriter();
+
+        ClawCtlConsole.WriteGatewayStartOutcome(
+            output,
+            new GatewayStartResult(
+                GatewayState.Running,
+                new GatewayRecord { ObservedPorts = [18789] },
+                AlreadyRunning: false,
+                "The gateway is running."),
+            useUnicode: useUnicode);
+
+        Assert.Equal(expected + Environment.NewLine, output.ToString());
+    }
+
+    [Theory]
+    [InlineData((int)GatewayState.Starting, "still starting")]
+    [InlineData((int)GatewayState.Unknown, "unverified")]
+    public void UncertainGatewayOutcomeDirectsTheUserToStatus(
+        int stateValue,
+        string expectedState)
+    {
+        using var output = new StringWriter();
+
+        ClawCtlConsole.WriteGatewayStartOutcome(
+            output,
+            new GatewayStartResult(
+                (GatewayState)stateValue,
+                new GatewayRecord(),
+                AlreadyRunning: false,
+                "The gateway [state] could not be verified."),
+            useUnicode: true);
+
+        string rendered = output.ToString();
+        Assert.Contains(
+            $"\U0001f980 ! Gateway: {expectedState}. " +
+            "The gateway [state] could not be verified.",
+            rendered,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Check with clawctl gateway-service status.",
+            rendered,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "clawctl gateway-service start",
+            rendered,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StoppedGatewayOutcomeReportsFailureAndRetry()
+    {
+        using var output = new StringWriter();
+
+        ClawCtlConsole.WriteGatewayStartOutcome(
+            output,
+            new GatewayStartResult(
+                GatewayState.Stopped,
+                new GatewayRecord(),
+                AlreadyRunning: false,
+                "The gateway exited during startup."),
+            useUnicode: true);
+
+        string rendered = output.ToString();
+        Assert.Contains(
+            "\U0001f980 \u2717 Gateway: failed. The gateway exited during startup.",
+            rendered,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Retry with clawctl gateway-service start.",
+            rendered,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GatewayStartExceptionReportsFailureAndRetryWithoutParsingMarkup()
+    {
+        using var output = new StringWriter();
+
+        ClawCtlConsole.WriteGatewayStartFailure(
+            output,
+            @"Gateway [launch] failed at C:\work.",
+            useUnicode: false);
+
+        string rendered = output.ToString();
+        Assert.Contains(
+            @"[x] Gateway: failed. Gateway [launch] failed at C:\work.",
+            rendered,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Retry with clawctl gateway-service start.",
+            rendered,
             StringComparison.Ordinal);
     }
 
@@ -352,6 +494,61 @@ public sealed class ClawCtlConsoleTests
         Assert.Equal(
             plain.ToString(),
             Regex.Replace(colored.ToString(), "\u001b\\[[0-9;]*m", string.Empty));
+    }
+
+    private sealed class SpinnerObservingTextWriter(IReadOnlyCollection<string> spinnerFrames)
+        : StringWriter
+    {
+        private readonly Lock _gate = new();
+        private readonly TaskCompletionSource _spinnerFrameObserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task SpinnerFrameObserved => _spinnerFrameObserved.Task;
+
+        public string GetText()
+        {
+            lock (_gate)
+            {
+                return base.ToString();
+            }
+        }
+
+        public override void Write(char value)
+        {
+            lock (_gate)
+            {
+                base.Write(value);
+                SignalIfObserved();
+            }
+        }
+
+        public override void Write(string? value)
+        {
+            lock (_gate)
+            {
+                base.Write(value);
+                SignalIfObserved();
+            }
+        }
+
+        public override void Write(char[] buffer, int index, int count)
+        {
+            lock (_gate)
+            {
+                base.Write(buffer, index, count);
+                SignalIfObserved();
+            }
+        }
+
+        private void SignalIfObserved()
+        {
+            string rendered = GetStringBuilder().ToString();
+            if (spinnerFrames.Any(
+                    frame => rendered.Contains(frame, StringComparison.Ordinal)))
+            {
+                _spinnerFrameObserved.TrySetResult();
+            }
+        }
     }
 
 }

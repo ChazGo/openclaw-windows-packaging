@@ -121,6 +121,7 @@ internal static class ClawCtlConsole
         bool useColor,
         bool narrate,
         bool outputIsInteractive,
+        bool useUnicode,
         Func<IProgress<GatewayStartProgress>, Task<GatewayStartResult>> start) =>
         NarrateAsync(
             output,
@@ -128,9 +129,51 @@ internal static class ClawCtlConsole
             narrate,
             outputIsInteractive,
             GatewayStartProgress.Initial,
-            start);
+            start,
+            useUnicode);
 
-    internal static void WriteGatewayStartWarning(
+    internal static void WriteGatewayStartOutcome(
+        TextWriter output,
+        GatewayStartResult result,
+        bool useColor = false,
+        bool? useUnicode = null)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(result);
+
+        bool unicode = useUnicode ?? SupportsUnicode(output);
+        (StatusKind kind, string word, string trailing) = result.State switch
+        {
+            GatewayState.Running => (
+                StatusKind.Success,
+                "running",
+                $" on {GatewayController.DescribePorts(result.Record)}."),
+            GatewayState.Starting => (
+                StatusKind.Warning,
+                "still starting",
+                $". {result.Message}"),
+            GatewayState.Unknown => (
+                StatusKind.Warning,
+                "unverified",
+                $". {result.Message}"),
+            _ => (
+                StatusKind.Failure,
+                "failed",
+                $". {result.Message}")
+        };
+
+        RenderGatewayOutcome(output, kind, word, trailing, useColor, unicode);
+        if (result.State is GatewayState.Starting or GatewayState.Unknown)
+        {
+            WriteGatewayStatusGuidance(output, useColor, unicode);
+        }
+        else if (result.State != GatewayState.Running)
+        {
+            WriteGatewayRetryGuidance(output, useColor, unicode);
+        }
+    }
+
+    internal static void WriteGatewayStartFailure(
         TextWriter output,
         string detail,
         bool useColor = false,
@@ -140,24 +183,74 @@ internal static class ClawCtlConsole
         ArgumentException.ThrowIfNullOrWhiteSpace(detail);
 
         bool unicode = useUnicode ?? SupportsUnicode(output);
+        RenderGatewayOutcome(
+            output,
+            StatusKind.Failure,
+            "failed",
+            $". {detail}",
+            useColor,
+            unicode);
+        WriteGatewayRetryGuidance(output, useColor, unicode);
+    }
+
+    private static void RenderGatewayOutcome(
+        TextWriter output,
+        StatusKind kind,
+        string word,
+        string trailing,
+        bool useColor,
+        bool unicode)
+    {
+        Style style = kind switch
+        {
+            StatusKind.Success => SuccessStyle,
+            StatusKind.Warning => WarningStyle,
+            StatusKind.Failure => FailureStyle,
+            _ => MutedStyle
+        };
         var paragraph = new Paragraph();
         if (unicode)
         {
-            paragraph.Append($"{IdentityMark} ", WarningStyle);
+            paragraph.Append($"{IdentityMark} ", style);
         }
 
-        paragraph.Append("Warning:", WarningStyle);
-        paragraph.Append($" {detail}");
-        Render(output, paragraph, useColor, unicode);
+        string? mark = Mark(kind, unicode);
+        if (mark is not null)
+        {
+            paragraph.Append(mark, style);
+            paragraph.Append(" ");
+        }
 
-        // The retry command is rendered separately so the width-constrained
-        // paragraph above cannot wrap it across lines, which would make it
-        // unusable to copy.
-        var retry = new Paragraph();
-        retry.Append("Retry with ");
-        retry.Append("clawctl gateway-service start", AccentStyle);
-        retry.Append(".");
-        Render(output, retry, useColor, unicode);
+        paragraph.Append("Gateway: ");
+        paragraph.Append(word, style);
+        paragraph.Append(trailing);
+        Render(output, paragraph, useColor, unicode);
+    }
+
+    private static void WriteGatewayStatusGuidance(
+        TextWriter output,
+        bool useColor,
+        bool unicode)
+    {
+        var guidance = new Paragraph();
+        guidance.Append("Check with ");
+        guidance.Append("clawctl gateway-service status", AccentStyle);
+        guidance.Append(".");
+        Render(output, guidance, useColor, unicode);
+    }
+
+    private static void WriteGatewayRetryGuidance(
+        TextWriter output,
+        bool useColor,
+        bool unicode)
+    {
+        // Keep the retry command on its own line so terminal wrapping cannot
+        // make the next action difficult to copy.
+        var guidance = new Paragraph();
+        guidance.Append("Retry with ");
+        guidance.Append("clawctl gateway-service start", AccentStyle);
+        guidance.Append(".");
+        Render(output, guidance, useColor, unicode);
     }
 
     internal static void WriteVersion(TextWriter output, bool useColor = false)
@@ -281,7 +374,8 @@ internal static class ClawCtlConsole
         bool narrate,
         bool outputIsInteractive,
         ClawCtlProgress initial,
-        Func<IProgress<ClawCtlProgress>, Task<T>> operation)
+        Func<IProgress<ClawCtlProgress>, Task<T>> operation,
+        bool? useUnicode = null)
     {
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(initial);
@@ -311,7 +405,7 @@ internal static class ClawCtlConsole
         IAnsiConsole console = CreateConsole(
             output,
             useColor,
-            SupportsUnicode(output),
+            useUnicode ?? SupportsUnicode(output),
             ResolveWidth(output),
             InteractionSupport.Yes);
         return await NarrateWithStatusAsync(console, initial, operation)
