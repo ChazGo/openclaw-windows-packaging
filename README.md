@@ -482,6 +482,9 @@ client attachment or discover the real `session.sharedFolder` through
 `clawctl status --json` in the user's normal terminal; that command can start the
 recorded session. Agent-side file access alone does not prove user access.
 Generic Windows `PUBLIC` or `TEMP` variables are not sharing metadata.
+The agent should ask when no host-reported or user-approved destination is known,
+not infer sharing from a folder name or existing files. Before handing off a file,
+it should read the exact requested revision rather than reuse an earlier artifact.
 Filesystem access and a working client attachment/download are separate checks;
 a clickable path alone is not delivery proof.
 The prompt hook also respects `hooks.allowPromptInjection=false` and

@@ -227,6 +227,10 @@ cleanup. For files, test recipient filesystem access separately from real
 client open/download behavior and exact bytes. Preserve private originals and
 negative controls, and reject generic `PUBLIC`/`TEMP` variables as sharing
 metadata. Keep live device codes out of retained proof.
+Include similar filenames, earlier attachments, and changed contents at the same
+path; compare the actual downloaded bytes with the requested revision. Pair
+missing or misleading sharing hints with an explicit host-reported destination,
+and repeat a representative case after observed real-model compaction.
 
 The plugin uses `before_prompt_build` with `appendSystemContext` and
 `prependContext`, both derived from the same static instructions. System context
