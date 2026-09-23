@@ -487,6 +487,10 @@ not infer sharing from a folder name or existing files. Before handing off a fil
 it should read the exact requested revision rather than reuse an earlier artifact.
 Filesystem access and a working client attachment/download are separate checks;
 a clickable path alone is not delivery proof.
+For a file requested in chat, the instructions call for a new supported attachment
+of the current revision or an explicit delivery limitation. A filesystem copy or
+older attachment does not complete that request; both routes are used only when
+requested.
 The prompt hook also respects `hooks.allowPromptInjection=false` and
 `hooks.allowConversationAccess=false` under the plugin's configuration entry.
 Coverage and the local-only runtime proof are described in

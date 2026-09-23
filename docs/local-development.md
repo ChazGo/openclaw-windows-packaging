@@ -231,6 +231,9 @@ Include similar filenames, earlier attachments, and changed contents at the same
 path; compare the actual downloaded bytes with the requested revision. Pair
 missing or misleading sharing hints with an explicit host-reported destination,
 and repeat a representative case after observed real-model compaction.
+For in-chat requests, require a new attachment from the tested response before
+checking downloaded bytes; an older card cannot satisfy the case. Record
+corrective prompts and browser reloads separately from first-pass delivery.
 
 The plugin uses `before_prompt_build` with `appendSystemContext` and
 `prependContext`, both derived from the same static instructions. System context
