@@ -224,6 +224,8 @@ The plugin uses `before_prompt_build` with `appendSystemContext` and
 `prependContext`, both derived from the same static instructions. System context
 states the host constraints at instruction priority; real-model testing showed
 that user context alone could reach the model yet still be ignored. The user
+interaction rule covers both launching and offering an unusable local dialog;
+validate proposed next steps as well as tool calls in real-model scenarios. The user
 copy remains a compatibility fallback because the approved v2026.9.4 runtime
 can replace system-context additions on runtime-only events. Remove that
 fallback only after the selected runtime preserves system context through

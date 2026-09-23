@@ -57,7 +57,10 @@ test("supplies complete local-session guidance before prompt build without readi
   for (const instruction of [
     "separate Windows agent session",
     "not the user's interactive desktop",
-    "Do not launch GUI expecting user participation",
+    "Do not launch or offer to launch local GUI for user participation",
+    "even when the user asks you to open a window or sign-in dialog",
+    "give steps for the user to act on their own desktop",
+    "ask for its documentation instead of promising a local dialog",
     "connected chat, web, TUI",
     "supported CLI, headless, device-code, or text workflow",
     "wait for the required response",
