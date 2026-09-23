@@ -63,12 +63,14 @@ const server = http.createServer(async (request, response) => {
     const summary = !body.tools?.length;
     console.log(`${scenario.name}: ${summary ? "summary" : "agent"} request ${requestCount}`);
     if (!summary) {
-      const rendered = JSON.stringify(body.messages);
-      assert.equal(rendered.split("## Windows agent session").length - 1, scenario.guidance ? 1 : 0,
-        "Each tool-bearing request must have exactly one instruction block.");
-      if (scenario.guidance) {
-        assert.ok(rendered.includes(JSON.stringify(instructions).slice(1, -1)),
-          "The entire instruction block must reach the model, not just its heading.");
+      for (const roles of [["system", "developer"], ["user"]]) {
+        const rendered = JSON.stringify(body.messages.filter(message => roles.includes(message.role)));
+        assert.equal(rendered.split("## Windows agent session").length - 1, scenario.guidance ? 1 : 0,
+          `Each tool-bearing request must have one instruction block in ${roles.join("/")} context.`);
+        if (scenario.guidance) {
+          assert.ok(rendered.includes(JSON.stringify(instructions).slice(1, -1)),
+            "The entire instruction block must reach the model, not just its heading.");
+        }
       }
       assert.deepEqual(body.tools.map(tool => tool.function.name), ["read"]);
       scenario.agentRequests++;

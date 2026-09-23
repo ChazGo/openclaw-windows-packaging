@@ -214,14 +214,20 @@ real account, package registration, or scheduled task is involved.
 
 The fixture captures actual embedded-runner requests before the first tool,
 through a forced context-overflow/compaction retry, on the next turn, and in
-new, subagent-key, and cron-key sessions. It checks one complete instruction
-block rather than just hook registration, plus plugin/hook opt-outs and
+new, subagent-key, and cron-key sessions. It checks the complete instruction
+block in both system and user context rather than just hook registration, plus plugin/hook opt-outs and
 unchanged user configuration and instruction files. It does not schedule cron
 jobs, spawn remote agents, evaluate model obedience, or prove attachment
 delivery/user-side filesystem access.
 
-The plugin uses `before_prompt_build` with `prependContext`. The approved
-v2026.9.4 runtime can replace system-context additions on runtime-only events;
+The plugin uses `before_prompt_build` with `appendSystemContext` and
+`prependContext`, both derived from the same static instructions. System context
+states the host constraints at instruction priority; real-model testing showed
+that user context alone could reach the model yet still be ignored. The user
+copy remains a compatibility fallback because the approved v2026.9.4 runtime
+can replace system-context additions on runtime-only events. Remove that
+fallback only after the selected runtime preserves system context through
+those events and the request-boundary proof covers them. Until then,
 this lane does not synthesize those events or qualify external CLI/realtime
 backends. Raw-model and settled-finalization operations omit prompt hooks.
 Do not treat successful registration as universal context coverage. Repeat

@@ -51,8 +51,9 @@ test("supplies complete local-session guidance before prompt build without readi
     get() { throw new Error("Static guidance must not inspect conversation data."); },
   });
   const result = hooks[0].handler(unreadable, unreadable);
-  assert.deepEqual(Object.keys(result), ["prependContext"]);
+  assert.deepEqual(Object.keys(result), ["prependContext", "appendSystemContext"]);
   const text = result.prependContext;
+  assert.equal(result.appendSystemContext, text);
   for (const instruction of [
     "separate Windows agent session",
     "not the user's interactive desktop",
@@ -79,7 +80,9 @@ test("supplies complete local-session guidance before prompt build without readi
   }
   assert.deepEqual(hooks[0].handler(), result);
   result.prependContext = "caller mutation";
+  result.appendSystemContext = "caller mutation";
   assert.equal(hooks[0].handler().prependContext, text);
+  assert.equal(hooks[0].handler().appendSystemContext, text);
 });
 
 test("does not infer local isolation from platform alone or a remote Windows node", () => {

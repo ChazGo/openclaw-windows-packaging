@@ -46,8 +46,9 @@ if (args[0] === "--version") {
     plugin.register({
       on(name, handler) {
         hooks.push({ name });
-        assert.deepEqual(Object.keys(handler()), ["prependContext"]);
+        assert.deepEqual(Object.keys(handler()), ["prependContext", "appendSystemContext"]);
         assert.match(handler().prependContext, /separate Windows agent session/);
+        assert.equal(handler().appendSystemContext, handler().prependContext);
       },
       session: {
         controls: {
