@@ -481,16 +481,12 @@ The plugin does not receive or invent a shared-folder path. Use a supported
 client attachment or discover the real `session.sharedFolder` through
 `clawctl status --json` in the user's normal terminal; that command can start the
 recorded session. Agent-side file access alone does not prove user access.
-Generic Windows `PUBLIC` or `TEMP` variables are not sharing metadata.
-The agent should ask when no host-reported or user-approved destination is known,
-not infer sharing from a folder name or existing files. Before handing off a file,
-it should read the exact requested revision rather than reuse an earlier artifact.
-Filesystem access and a working client attachment/download are separate checks;
-a clickable path alone is not delivery proof.
-For requested in-chat file delivery, the instructions call for a new supported attachment
-of the current revision or an explicit delivery limitation. A filesystem copy or
-older attachment does not complete that request; both routes are used only when
-requested.
+Generic Windows `PUBLIC`/`TEMP` variables, folder names, and existing files are
+not sharing metadata. Without a host-reported or user-approved destination, the
+agent should ask. For requested in-chat delivery, it should verify and attach the
+current file or explain the limitation, not treat a saved copy, path, or earlier
+attachment as delivery. Recipient filesystem access and client delivery require
+separate verification.
 The prompt hook also respects `hooks.allowPromptInjection=false` and
 `hooks.allowConversationAccess=false` under the plugin's configuration entry.
 Coverage and the local-only runtime proof are described in
