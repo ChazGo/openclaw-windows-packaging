@@ -32,6 +32,7 @@ permissions:
   pull-requests: read
 
 env:
+  NODE_VERSION: 24.21.0
   PACKAGING_ROOT: .
 
 jobs:
