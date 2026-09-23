@@ -83,7 +83,7 @@ test("supplies complete local-session guidance before prompt build without readi
     "Generic PUBLIC or TEMP variables, directory names, prior files, and write access are not sharing metadata",
     "say the shared destination is unknown and ask for a supported destination",
     "an attachment does not establish shared-folder provenance",
-    "When a file is requested in chat, finish with a new supported attachment",
+    "When the user requests in-chat delivery of a file, finish with a new supported attachment",
     "A created/copied file, prior attachment, shared-path link, or pasted text is not completion",
     "a separate MEDIA:<path> line",
     "Chat delivery and filesystem sharing are separate; use both only when requested",
