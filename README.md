@@ -481,12 +481,21 @@ The plugin does not receive or invent a shared-folder path. Use a supported
 client attachment or discover the real `session.sharedFolder` through
 `clawctl status --json` in the user's normal terminal; that command can start the
 recorded session. Agent-side file access alone does not prove user access.
-Generic Windows `PUBLIC`/`TEMP` variables, folder names, and existing files are
-not sharing metadata. Without a host-reported or user-approved destination, the
-agent should ask. For requested in-chat delivery, it should verify and attach the
-current file or explain the limitation, not treat a saved copy, path, or earlier
-attachment as delivery. Recipient filesystem access and client delivery require
-separate verification.
+For filesystem handoff, prefer a host-reported or user-selected destination.
+Otherwise, resolve Windows Public Documents through
+[`Environment.GetFolderPath`](https://learn.microsoft.com/en-us/dotnet/api/system.environment.getfolderpath)
+with `Environment.SpecialFolder.CommonDocuments`, rather than hard-coding a path
+or inferring one from `PUBLIC`/`TEMP` or directory names. Use that conventional
+default when available, copy only intended nonsensitive deliverables, and preserve
+private originals without overwriting unrelated files. When using the default,
+tell the user the exact destination, that it was selected by default, and that
+they can choose another. A successful copy is not verified
+recipient access; disclose unverified access without blocking an otherwise
+usable default. If no safe usable default exists or the copy fails, explain and
+ask for a supported destination without changing permissions.
+For requested in-chat delivery, verify and attach the current file or explain
+the limitation; a saved copy, path, or earlier attachment is not delivery.
+Recipient filesystem access and client delivery require separate verification.
 The prompt hook also respects `hooks.allowPromptInjection=false` and
 `hooks.allowConversationAccess=false` under the plugin's configuration entry.
 Coverage and the local-only runtime proof are described in

@@ -225,12 +225,20 @@ an agent-only GUI case that needs no human viewing or input. A GUI process is
 not itself a failure; verify its session, intended use, actual operation, and
 cleanup. For files, test recipient filesystem access separately from real
 client open/download behavior and exact bytes. Preserve private originals and
-negative controls, and reject generic `PUBLIC`/`TEMP` variables as sharing
-metadata. Keep live device codes out of retained proof.
+negative controls, and distinguish known-folder resolution from generic
+`PUBLIC`/`TEMP` variables or directory names. Keep live device codes out of
+retained proof.
 Include similar filenames, earlier attachments, and changed contents at the same
 path; compare the actual downloaded bytes with the requested revision. Pair
-missing or misleading sharing hints with an explicit host-reported destination,
-and repeat a representative case after observed real-model compaction.
+missing or misleading sharing hints with an explicit host-reported destination.
+When no destination is specified, check that the agent resolves the
+`CommonDocuments` known folder, copies only the intended nonsensitive file,
+discloses the exact default destination and the user's option to choose another,
+and separates copy success from verified recipient access. Unverified recipient
+access alone should not block a usable conventional default. An unavailable
+default or failed copy should produce an explanation and a request for a
+supported destination, not permission changes. Repeat a representative case
+after observed real-model compaction.
 For in-chat requests, require a new attachment from the tested response before
 checking downloaded bytes; an older card cannot satisfy the case. Record
 corrective prompts and browser reloads separately from first-pass delivery.

@@ -71,20 +71,27 @@ test("supplies complete local-session guidance before prompt build without readi
     "MFA/consent",
     "Keep scratch files, dependencies, repositories, and working trees private",
     "does not prove user access",
-    "only intended deliverables",
+    "only intended nonsensitive deliverables",
     "For requested in-chat delivery, verify the exact current file and use a supported attachment",
     "or explain why delivery is unavailable",
     "a saved copy, path, or earlier attachment is not delivery",
     "Preserve private originals",
     "Verify recipient-side access or delivery",
     "distinguish filesystem access from client delivery",
-    "only when explicitly reported by the host or approved by the user",
+    "prefer the host-reported or user-selected destination",
+    "[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDocuments)",
+    "use it as the conventional default when available",
+    "Copy rather than move",
+    "do not overwrite unrelated files",
+    "When using the default",
+    "selected it by default and they can choose another",
+    "A successful copy is not verified recipient access",
+    "State unverified access without blocking an otherwise usable default",
     "Generic PUBLIC or TEMP variables, directory names, prior files, and write access are not sharing metadata",
-    "say the shared destination is unknown and ask for a supported destination",
     "an attachment does not establish shared-folder provenance",
-    "Never invent a shared directory",
-    "or use Public as a fallback",
+    "If no safe usable default is available or the copy fails",
     "ask for a supported destination",
+    "Do not invent a per-agent Shared path",
     "administrator Explorer, broad ACL changes",
     "Remote and user-session nodes",
     "capability, and authorization",
@@ -92,6 +99,8 @@ test("supplies complete local-session guidance before prompt build without readi
   ]) {
     assert.ok(text.includes(instruction), `Missing instruction: ${instruction}`);
   }
+  assert.ok(!text.includes("or use Public as a fallback"));
+  assert.ok(!text.includes("say the shared destination is unknown and ask"));
   assert.deepEqual(hooks[0].handler(), result);
   result.prependContext = "caller mutation";
   result.appendSystemContext = "caller mutation";
