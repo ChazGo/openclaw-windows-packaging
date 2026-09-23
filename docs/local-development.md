@@ -220,6 +220,14 @@ unchanged user configuration and instruction files. It does not schedule cron
 jobs, spawn remote agents, evaluate model obedience, or prove attachment
 delivery/user-side filesystem access.
 
+In authorized installed-environment tests, pair a human-participation case with
+an agent-only GUI case that needs no human viewing or input. A GUI process is
+not itself a failure; verify its session, intended use, actual operation, and
+cleanup. For files, test recipient filesystem access separately from real
+client open/download behavior and exact bytes. Preserve private originals and
+negative controls, and reject generic `PUBLIC`/`TEMP` variables as sharing
+metadata. Keep live device codes out of retained proof.
+
 The plugin uses `before_prompt_build` with `appendSystemContext` and
 `prependContext`, both derived from the same static instructions. System context
 states the host constraints at instruction priority; real-model testing showed

@@ -470,7 +470,9 @@ The same plugin supplies agent instructions on Windows when the launcher report
 is exactly `enabled`. Before supported agent runs, it prepends context explaining
 that local GUI is not the user's desktop, user participation needs a supported
 text/headless route, and private work should stay private while only intended
-deliverables are handed off. Remote or user-session nodes require their own
+deliverables are handed off. Authorized agent-only GUI work that needs no human
+viewing or input is allowed; this is not a blanket GUI prohibition.
+Remote or user-session nodes require their own
 capability and authorization checks. This is guidance, not isolation enforcement
 or a file-export feature; it does not install a skill or overwrite workspace
 instructions or configuration.
@@ -479,6 +481,9 @@ The plugin does not receive or invent a shared-folder path. Use a supported
 client attachment or discover the real `session.sharedFolder` through
 `clawctl status --json` in the user's normal terminal; that command can start the
 recorded session. Agent-side file access alone does not prove user access.
+Generic Windows `PUBLIC` or `TEMP` variables are not sharing metadata.
+Filesystem access and a working client attachment/download are separate checks;
+a clickable path alone is not delivery proof.
 The prompt hook also respects `hooks.allowPromptInjection=false` and
 `hooks.allowConversationAccess=false` under the plugin's configuration entry.
 Coverage and the local-only runtime proof are described in
