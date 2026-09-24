@@ -483,12 +483,14 @@ client attachment or discover the real `session.sharedFolder` through
 recorded session. Agent-side file access alone does not prove user access.
 For filesystem handoff, prefer a host-reported or user-selected destination.
 Otherwise, prefer a supported chat attachment. If a filesystem destination is
-still needed, suggest Windows Public Documents by resolving it through
+still needed, use an agent tool to resolve Windows Public Documents through
 [`Environment.GetFolderPath`](https://learn.microsoft.com/en-us/dotnet/api/system.environment.getfolderpath)
 with `Environment.SpecialFolder.CommonDocuments`, rather than hard-coding a path
-or inferring one from `PUBLIC`/`TEMP` or directory names. Before copying there,
-explain the exact destination and its all-local-users audience, offer another
-destination, and obtain explicit agreement unless already given. Do not copy
+or inferring one from `PUBLIC`/`TEMP` or directory names. Before asking for
+agreement, show the complete destination in a fenced text code block rather
+than an inline path or file link that can become a filename-only chip.
+Explain its all-local-users audience, offer another destination, and obtain
+explicit agreement before copying unless already given. Do not copy
 while consent is pending or after it is declined; a generic handoff request or
 a file appearing nonsensitive does not authorize that wider audience. Copy only
 intended nonsensitive deliverables and preserve private originals without
