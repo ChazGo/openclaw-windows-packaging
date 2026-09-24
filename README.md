@@ -482,17 +482,19 @@ client attachment or discover the real `session.sharedFolder` through
 `clawctl status --json` in the user's normal terminal; that command can start the
 recorded session. Agent-side file access alone does not prove user access.
 For filesystem handoff, prefer a host-reported or user-selected destination.
-Otherwise, resolve Windows Public Documents through
+Otherwise, prefer a supported chat attachment. If a filesystem destination is
+still needed, suggest Windows Public Documents by resolving it through
 [`Environment.GetFolderPath`](https://learn.microsoft.com/en-us/dotnet/api/system.environment.getfolderpath)
 with `Environment.SpecialFolder.CommonDocuments`, rather than hard-coding a path
-or inferring one from `PUBLIC`/`TEMP` or directory names. Use that conventional
-default when available, copy only intended nonsensitive deliverables, and preserve
-private originals without overwriting unrelated files. When using the default,
-tell the user the exact destination, that it was selected by default, and that
-they can choose another. A successful copy is not verified
-recipient access; disclose unverified access without blocking an otherwise
-usable default. If no safe usable default exists or the copy fails, explain and
-ask for a supported destination without changing permissions.
+or inferring one from `PUBLIC`/`TEMP` or directory names. Before copying there,
+explain the exact destination and its all-local-users audience, offer another
+destination, and obtain explicit agreement unless already given. Do not copy
+while consent is pending or after it is declined; a generic handoff request or
+a file appearing nonsensitive does not authorize that wider audience. Copy only
+intended nonsensitive deliverables and preserve private originals without
+overwriting unrelated files. A successful copy is not verified recipient access;
+state what remains unverified. If no safe approved destination exists or the
+copy fails, explain and ask for a supported destination without changing permissions.
 For requested in-chat delivery, verify and attach the current file or explain
 the limitation; a saved copy, path, or earlier attachment is not delivery.
 Recipient filesystem access and client delivery require separate verification.

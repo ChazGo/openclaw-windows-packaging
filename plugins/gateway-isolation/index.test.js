@@ -79,17 +79,22 @@ test("supplies complete local-session guidance before prompt build without readi
     "Verify recipient-side access or delivery",
     "distinguish filesystem access from client delivery",
     "prefer the host-reported or user-selected destination",
+    "If neither is provided, prefer a supported chat attachment",
     "[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDocuments)",
-    "use it as the conventional default when available",
+    "suggest it when available",
+    "Before copying there",
+    "the folder is intended for all local users",
+    "explicit agreement to that destination and audience",
+    "Do not copy there while consent is pending or if it is declined",
+    "A generic handoff request or a file appearing nonsensitive is not permission to share with other local users",
     "Copy rather than move",
     "do not overwrite unrelated files",
-    "When using the default",
-    "selected it by default and they can choose another",
+    "the user can choose another destination",
     "A successful copy is not verified recipient access",
-    "State unverified access without blocking an otherwise usable default",
+    "State what access remains unverified",
     "Generic PUBLIC or TEMP variables, directory names, prior files, and write access are not sharing metadata",
     "an attachment does not establish shared-folder provenance",
-    "If no safe usable default is available or the copy fails",
+    "If no safe approved destination is available or the copy fails",
     "ask for a supported destination",
     "Do not invent a per-agent Shared path",
     "administrator Explorer, broad ACL changes",
@@ -101,6 +106,7 @@ test("supplies complete local-session guidance before prompt build without readi
   }
   assert.ok(!text.includes("or use Public as a fallback"));
   assert.ok(!text.includes("say the shared destination is unknown and ask"));
+  assert.ok(!text.includes("use it as the conventional default when available"));
   assert.deepEqual(hooks[0].handler(), result);
   result.prependContext = "caller mutation";
   result.appendSystemContext = "caller mutation";
