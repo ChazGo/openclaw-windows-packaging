@@ -79,27 +79,24 @@ test("supplies complete local-session guidance before prompt build without readi
     "Verify recipient-side access or delivery",
     "distinguish filesystem access from client delivery",
     "prefer the host-reported or user-selected destination",
-    "If neither is provided, prefer a supported chat attachment",
-    "use a tool to resolve Windows Public Documents",
-    "[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDocuments)",
-    "suggest it when available",
+    "If neither is provided, use the isolated agent account's existing Shared folder",
+    "use a local tool inside this Windows agent session",
+    "(Resolve-Path -LiteralPath (Join-Path $env:USERPROFILE 'Shared') -ErrorAction Stop).Path",
+    "Verify that the resolved path is an existing directory",
+    "Do not expand the human user's USERPROFILE",
+    "OpenClaw workspace or state directory",
     "Before copying there",
     "show the complete resolved destination in a fenced text code block, not an inline path or file link",
-    "before asking for agreement",
-    "the folder is intended for all local users",
-    "explicit agreement to that destination and audience",
-    "Do not copy there while consent is pending or if it is declined",
-    "A generic handoff request or a file appearing nonsensitive is not permission to share with other local users",
+    "Do not copy to a destination the user declines",
     "Copy rather than move",
     "do not overwrite unrelated files",
     "the user can choose another destination",
     "A successful copy is not verified recipient access",
     "State what access remains unverified",
-    "Generic PUBLIC or TEMP variables, directory names, prior files, and write access are not sharing metadata",
-    "an attachment does not establish shared-folder provenance",
-    "If no safe approved destination is available or the copy fails",
+    "If profile or Shared-folder resolution fails, the directory is missing, or access or copying fails",
+    "report the failure",
     "ask for a supported destination",
-    "Do not invent a per-agent Shared path",
+    "Do not fall back to Public Documents or PUBLIC/TEMP",
     "administrator Explorer, broad ACL changes",
     "Remote and user-session nodes",
     "capability, and authorization",
@@ -107,9 +104,8 @@ test("supplies complete local-session guidance before prompt build without readi
   ]) {
     assert.ok(text.includes(instruction), `Missing instruction: ${instruction}`);
   }
-  assert.ok(!text.includes("or use Public as a fallback"));
-  assert.ok(!text.includes("say the shared destination is unknown and ask"));
-  assert.ok(!text.includes("use it as the conventional default when available"));
+  assert.ok(!text.includes("CommonDocuments"));
+  assert.ok(!text.includes("all local users"));
   assert.deepEqual(hooks[0].handler(), result);
   result.prependContext = "caller mutation";
   result.appendSystemContext = "caller mutation";

@@ -477,26 +477,29 @@ capability and authorization checks. This is guidance, not isolation enforcement
 or a file-export feature; it does not install a skill or overwrite workspace
 instructions or configuration.
 
-The plugin does not receive or invent a shared-folder path. Use a supported
-client attachment or discover the real `session.sharedFolder` through
-`clawctl status --json` in the user's normal terminal; that command can start the
-recorded session. Agent-side file access alone does not prove user access.
+The plugin supplies static guidance, not a shared-path environment variable.
 For filesystem handoff, prefer a host-reported or user-selected destination.
-Otherwise, prefer a supported chat attachment. If a filesystem destination is
-still needed, use an agent tool to resolve Windows Public Documents through
-[`Environment.GetFolderPath`](https://learn.microsoft.com/en-us/dotnet/api/system.environment.getfolderpath)
-with `Environment.SpecialFolder.CommonDocuments`, rather than hard-coding a path
-or inferring one from `PUBLIC`/`TEMP` or directory names. Before asking for
-agreement, show the complete destination in a fenced text code block rather
-than an inline path or file link that can become a filename-only chip.
-Explain its all-local-users audience, offer another destination, and obtain
-explicit agreement before copying unless already given. Do not copy
-while consent is pending or after it is declined; a generic handoff request or
-a file appearing nonsensitive does not authorize that wider audience. Copy only
-intended nonsensitive deliverables and preserve private originals without
-overwriting unrelated files. A successful copy is not verified recipient access;
-state what remains unverified. If no safe approved destination exists or the
-copy fails, explain and ask for a supported destination without changing permissions.
+The host reports `session.sharedFolder` through `clawctl status --json` in the
+user's normal terminal; that command can start the recorded session.
+When neither destination is supplied, the guidance assumes the isolated agent
+account has an existing `Shared` folder. Resolve it with a local tool inside
+that agent session, for example:
+
+```powershell
+(Resolve-Path -LiteralPath (Join-Path $env:USERPROFILE 'Shared') -ErrorAction Stop).Path
+```
+
+Verify that the result is an existing directory. `USERPROFILE` must belong to
+the isolated agent, not the interactive user; do not substitute the OpenClaw
+workspace/state directory or hard-code an account path. Before copying, display
+the complete destination in a fenced text code block rather than a filename-only
+chip, and offer another destination. Do not copy to a destination the user declines.
+Copy only intended nonsensitive deliverables, preserving private originals and
+unrelated files. Agent-side access or a successful copy does not prove recipient
+access; verify it where feasible and state what remains unverified.
+If resolution, directory availability, access or copying fails, report the failure
+and ask for a supported destination. Do not fall back to Public Documents or
+`PUBLIC`/`TEMP`, create a replacement shared root, or change permissions.
 For requested in-chat delivery, verify and attach the current file or explain
 the limitation; a saved copy, path, or earlier attachment is not delivery.
 Recipient filesystem access and client delivery require separate verification.

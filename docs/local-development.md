@@ -225,25 +225,25 @@ an agent-only GUI case that needs no human viewing or input. A GUI process is
 not itself a failure; verify its session, intended use, actual operation, and
 cleanup. For files, test recipient filesystem access separately from real
 client open/download behavior and exact bytes. Preserve private originals and
-negative controls, and distinguish known-folder resolution from generic
-`PUBLIC`/`TEMP` variables or directory names. Keep live device codes out of
+negative controls, and distinguish the isolated agent's profile from the
+interactive user's profile and OpenClaw workspace/state. Keep live device codes out of
 retained proof.
 Include similar filenames, earlier attachments, and changed contents at the same
 path; compare the actual downloaded bytes with the requested revision. Pair
 missing or misleading sharing hints with an explicit host-reported destination.
-When no destination is specified, check that the agent prefers a supported chat
-attachment. If a filesystem destination is still needed, capture the agent's
-tool invocation and result resolving `CommonDocuments`; an independent harness
-lookup is not a substitute. Verify that the actual client visibly displays the
-complete proposed destination in a fenced text code block and the all-local-users
-audience before asking for agreement, not just a filename chip. Agree to that
-same proposed destination rather than supplying a replacement. Verify that no copy
-occurs before explicit agreement or after refusal. After agreement, check that
-only the intended nonsensitive file is copied and compare access from the
-requesting user and another ordinary local account, preserving private controls.
-Separate copy success from verified recipient access. An unavailable approved
-destination or failed copy should produce an explanation and a request for a
-supported destination, not permission changes. Repeat a representative case
+For a filesystem request with no destination, capture the agent's local tool
+invocation and result resolving its own `$env:USERPROFILE\Shared`, for example
+`(Resolve-Path -LiteralPath (Join-Path $env:USERPROFILE 'Shared') -ErrorAction Stop).Path`;
+an independent harness lookup is not a substitute for model-side resolution.
+Verify that the result is an existing directory and the actual client visibly
+displays the complete destination in a fenced text code block, not just a filename
+chip. Check that only the intended file is copied, its bytes match the private
+original, and the requester can read it while private controls remain denied.
+Retain host-reported or user-selected destination precedence and refusal/no-copy
+coverage. Missing profiles/directories and denied access or failed copies must
+produce an explicit explanation and a request for a supported destination, not a
+Public Documents fallback, a newly created shared root or permission changes.
+Separate copy success from verified recipient access. Repeat a representative case
 after observed real-model compaction.
 For in-chat requests, require a new attachment from the tested response before
 checking downloaded bytes; an older card cannot satisfy the case. Record
